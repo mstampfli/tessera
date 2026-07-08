@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type BulkResponse } from "@/lib/api";
 import { detect } from "@/lib/detect";
 import { useIngest } from "./IngestProvider";
@@ -71,6 +71,15 @@ export function IngestModal({ open, onClose }: { open: boolean; onClose: () => v
     }
   }, [files, paste, detections, track, onClose]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
@@ -79,6 +88,9 @@ export function IngestModal({ open, onClose }: { open: boolean; onClose: () => v
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Ingest data"
         className="mk-frame w-full max-w-2xl p-5"
         style={{ boxShadow: "var(--mk-shadow-pop)" }}
         onClick={(e) => e.stopPropagation()}

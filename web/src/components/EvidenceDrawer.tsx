@@ -10,6 +10,9 @@ export function EvidenceDrawer({ insightId, onClose }: { insightId: string; onCl
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Insight evidence"
         className="h-full w-full max-w-md overflow-y-auto border-l p-5"
         style={{ background: "var(--mk-surface-1)", borderColor: "var(--mk-border)", boxShadow: "var(--mk-shadow-pop)" }}
         onClick={(e) => e.stopPropagation()}

@@ -53,11 +53,13 @@ export function InsightCard({
   onOpenEvidence,
   onTriage,
   busy,
+  selected = false,
 }: {
   insight: Insight;
   onOpenEvidence: (id: string) => void;
   onTriage: (id: string, status: "useful" | "dismissed") => void;
   busy: boolean;
+  selected?: boolean;
 }) {
   const rail = SEVERITY_COLOR[insight.severity] ?? "var(--mk-border)";
   const dismissed = insight.status === "dismissed";
@@ -65,7 +67,12 @@ export function InsightCard({
   return (
     <div
       className="mk-card overflow-hidden"
-      style={{ borderLeft: `3px solid ${rail}`, opacity: dismissed ? 0.55 : 1 }}
+      style={{
+        borderLeft: `3px solid ${rail}`,
+        opacity: dismissed ? 0.55 : 1,
+        outline: selected ? "2px solid var(--mk-accent)" : "none",
+        outlineOffset: "2px",
+      }}
     >
       <div className="p-4">
         <div className="mb-2 flex items-center gap-2">
