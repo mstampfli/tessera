@@ -24,6 +24,10 @@ RUN apt-get update \
     && useradd --system --uid 10001 --home /app tessera
 WORKDIR /app
 COPY --from=builder /build/target/release/tesserad /usr/local/bin/tesserad
+# Create the content-store mount point owned by the non-root user, so a fresh
+# named volume mounted here is initialized writable (Docker copies this dir's
+# ownership onto an empty volume).
+RUN mkdir -p /data/cas && chown -R tessera:tessera /data
 USER tessera
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
