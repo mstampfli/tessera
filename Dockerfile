@@ -3,10 +3,19 @@
 
 FROM rust:1.95-slim-bookworm AS builder
 WORKDIR /build
-# Cache dependency compilation: copy manifests first.
+# FEATURES lets the cp1 (CPU-only, no Ollama) build enable in-process embeddings:
+#   docker build --build-arg FEATURES=fastembed ...
+# The default (empty) build uses the Ollama provider.
+ARG FEATURES=""
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --release --bin tesserad
+RUN if [ -n "$FEATURES" ]; then \
+        cargo build --release --bin tesserad --features "tessera-providers/$FEATURES"; \
+    else \
+        cargo build --release --bin tesserad; \
+    fi
 
 FROM debian:bookworm-slim AS runner
 RUN apt-get update \

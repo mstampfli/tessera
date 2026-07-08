@@ -1,0 +1,17 @@
+# Add to the hub's Caddyfile. Caddy terminates TLS over the tailnet and routes
+# API traffic to the backend and everything else to the frontend. Replace the
+# host and the tailnet IP with yours.
+#
+# /api/* is stripped and forwarded to the Rust core (which serves /v1/... and
+# /healthz). flush_interval -1 keeps Server-Sent Events (the live job feed)
+# unbuffered.
+
+tessera.mstampfli.com {
+    handle_path /api/* {
+        reverse_proxy 100.64.0.4:8400 {
+            flush_interval -1
+        }
+    }
+
+    reverse_proxy 100.64.0.4:8401
+}

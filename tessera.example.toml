@@ -20,6 +20,34 @@ worker_max_connections = 6
 path = "./data/cas"
 
 [log]
-# "pretty" for local dev, "json" for production.
+# "pretty" for local dev, "json" for production. Logs always go to stderr.
 format = "pretty"
 filter = "info,tessera=debug,sqlx=warn"
+
+[providers]
+# Embedding backend: "ollama" (default) or "fastembed" (in-process ONNX, requires
+# building with --features fastembed).
+embedder = "ollama"
+# Ordered LLM fallback chain for synthesis and ask.
+llm_chain = ["ollama"]
+
+[providers.ollama]
+base_url = "http://127.0.0.1:11434"
+embed_model = "nomic-embed-text"
+chat_model = "qwen2.5:3b"
+timeout_secs = 120
+
+[providers.claude_cli]
+bin = "claude"
+timeout_secs = 180
+max_concurrency = 1
+
+[pipeline]
+workers = 4
+embed_batch = 64
+# Max cosine distance for a chunk to join a cluster (model dependent).
+cluster_max_distance = 0.4
+# New members before a cluster's insight is re-synthesized.
+cluster_dirty_threshold = 3
+# Debounce (seconds) before synthesizing a dirty cluster.
+synth_debounce_secs = 30

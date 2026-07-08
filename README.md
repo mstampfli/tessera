@@ -110,6 +110,43 @@ npm run dev   # http://localhost:3000, proxies /api to the core on :8080
 Sign in with the user from step 3, then ingest by dropping files or pasting data,
 watch the pipeline progress live, and search or ask over what you have ingested.
 
+### For AI agents (MCP)
+
+tessera speaks the Model Context Protocol, so an agent can ingest, search, ask
+with citations, list insights, and walk the correlation graph directly. Connect a
+local agent over stdio:
+
+```sh
+claude mcp add tessera -- tesserad mcp-stdio
+```
+
+Tools: `tessera_ingest`, `tessera_search`, `tessera_ask`,
+`tessera_list_insights`, `tessera_get_entity_neighborhood`, `tessera_job_status`.
+Each is a thin delegate to the same service layer the REST API and web UI use.
+
+## Deployment
+
+The production stack (Postgres, the backend, and the frontend) runs from
+`docker-compose.prod.yml`, behind a TLS reverse proxy on a private tailnet. The
+database publishes no host port; the services bind to the host's tailnet IP.
+
+```sh
+cp .env.prod.example .env   # set POSTGRES_PASSWORD and APP_BIND
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+`deploy/Caddyfile.snippet` routes `/api/*` to the backend and everything else to
+the frontend. On a CPU-only host with no Ollama (for example a small VPS), build
+the backend with in-process embeddings: `BACKEND_FEATURES=fastembed` and
+`EMBEDDER=fastembed` in `.env`.
+
+Back up and restore the database and content store:
+
+```sh
+scripts/backup.sh                 # writes ./backups/<timestamp>/
+scripts/restore.sh backups/<timestamp>
+```
+
 ## Security posture
 
 - The Rust core owns all authentication. API tokens are 256-bit secrets stored
