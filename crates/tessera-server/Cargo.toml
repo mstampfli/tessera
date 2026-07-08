@@ -19,6 +19,7 @@ tessera-db.workspace = true
 tessera-api.workspace = true
 tessera-providers.workspace = true
 tessera-pipeline.workspace = true
+tessera-mcp.workspace = true
 tokio.workspace = true
 axum.workspace = true
 clap.workspace = true

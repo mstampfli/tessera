@@ -4137,8 +4137,17 @@ dependencies = [
 name = "tessera-mcp"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
  "tessera-core",
  "tessera-db",
+ "tessera-pipeline",
+ "tessera-providers",
+ "tessera-search",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4196,6 +4205,7 @@ dependencies = [
  "tessera-api",
  "tessera-core",
  "tessera-db",
+ "tessera-mcp",
  "tessera-pipeline",
  "tessera-providers",
  "tokio",

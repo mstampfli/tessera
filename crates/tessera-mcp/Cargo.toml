@@ -6,11 +6,20 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "MCP server exposing tessera to AI agents (ingest, search, ask, insights, entity neighborhood) over stdio and streamable HTTP."
+description = "MCP server exposing tessera to AI agents (ingest, search, ask, insights, entity neighborhood, job status) over stdio."
 
 [dependencies]
 tessera-core.workspace = true
 tessera-db.workspace = true
+tessera-search.workspace = true
+tessera-providers.workspace = true
+tessera-pipeline.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+base64.workspace = true
 
 [lints]
 workspace = true

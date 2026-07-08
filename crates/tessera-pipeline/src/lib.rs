@@ -6,11 +6,13 @@
 //! restarted worker converges to the same state rather than duplicating work.
 
 mod context;
+pub mod ingest;
 mod stages;
 mod synth;
 mod worker;
 
 pub use context::PipelineContext;
+pub use ingest::{ingest_bytes, IngestBytes, Ingested};
 pub use worker::{run_pipeline, PipelineHandle};
 
 /// Job kind: normalize + chunk a freshly ingested document, then fan out

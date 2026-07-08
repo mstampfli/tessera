@@ -30,8 +30,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Run the HTTP API (and, in later milestones, workers + MCP).
+    /// Run the HTTP API and the pipeline workers.
     Serve,
+    /// Run the MCP server over stdio (for local AI agents).
+    McpStdio,
     /// Apply database migrations and exit.
     Migrate,
     /// Print resolved config and check DB + CAS health.
@@ -98,11 +100,17 @@ pub fn init_tracing(config: &Config) {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(config.log.filter.clone()));
 
+    // Logs go to stderr so they never corrupt a stdout protocol channel (the
+    // MCP stdio server writes JSON-RPC to stdout).
     let registry = tracing_subscriber::registry().with(filter);
     if config.log.format == "json" {
-        registry.with(fmt::layer().json()).init();
+        registry
+            .with(fmt::layer().json().with_writer(std::io::stderr))
+            .init();
     } else {
-        registry.with(fmt::layer().compact()).init();
+        registry
+            .with(fmt::layer().compact().with_writer(std::io::stderr))
+            .init();
     }
 }
 
@@ -230,6 +238,21 @@ fn spawn_event_forwarder(url: String, events: EventBus) -> JoinHandle<()> {
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     })
+}
+
+/// Run the MCP server over stdio. Logs go to stderr; stdout is the JSON-RPC
+/// channel. Connect a local agent with:
+///   claude mcp add tessera -- tesserad mcp-stdio
+pub async fn mcp_stdio(config: Config) -> Result<()> {
+    let state = tessera_mcp::McpState::connect(&config)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))
+        .context("initializing MCP state")?;
+    tracing::info!("tessera MCP server ready on stdio");
+    tessera_mcp::run_stdio(state)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))
+        .context("MCP stdio server")
 }
 
 /// Apply migrations and exit (the one-shot compose `migrate` service).

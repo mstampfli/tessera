@@ -13,9 +13,8 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tessera_core::error::{Error, ErrorKind};
-use tessera_db::queue::{self, EnqueueOpts};
-use tessera_db::repos::{documents, sources};
-use tessera_pipeline::KIND_PROCESS_DOCUMENT;
+use tessera_db::queue;
+use tessera_db::repos::sources;
 use uuid::Uuid;
 
 use crate::auth::{AuthContext, Scope};
@@ -136,63 +135,35 @@ async fn resolve_source(
     Ok(src.id)
 }
 
-/// The core ingest step, shared by all three endpoints.
+/// The core ingest step, shared by all three endpoints. Delegates to the single
+/// ingestion path in the pipeline crate (the same one the MCP server uses).
 async fn ingest_one(
     state: &AppState,
     source_id: Uuid,
     item: &IngestItem,
 ) -> Result<IngestResult, ApiError> {
     let bytes = item.decode_bytes()?;
-
-    // Sniff to get the authoritative media type (client hint is advisory).
-    let sniffed = tessera_extract::sniff(&bytes, item.media_type.as_deref());
-
-    // Store bytes (deduped by content hash).
-    let (hash, size) = state.cas.write_bytes(&bytes).await?;
     let meta = item.meta.clone().unwrap_or_else(|| json!({}));
 
-    // Record the document and enqueue processing in one transaction.
-    let mut tx = state
-        .db
-        .api
-        .begin()
-        .await
-        .map_err(tessera_db::map_sqlx)
-        .map_err(ApiError)?;
-    let outcome = documents::create_pending_tx(
-        &mut tx,
-        &documents::NewDocument {
+    let ingested = tessera_pipeline::ingest_bytes(
+        &state.db,
+        &state.cas,
+        tessera_pipeline::IngestBytes {
             source_id,
-            content_hash: &hash,
-            media_type: &sniffed.media_type,
-            size_bytes: i64::try_from(size).unwrap_or(i64::MAX),
+            bytes: &bytes,
+            media_type_hint: item.media_type.as_deref(),
             title: item.title.as_deref(),
             uri: item.uri.as_deref(),
-            meta: &meta,
+            meta,
         },
     )
     .await
     .map_err(ApiError)?;
 
-    if !outcome.deduped {
-        queue::enqueue(
-            &mut *tx,
-            KIND_PROCESS_DOCUMENT,
-            &json!({ "document_id": outcome.document.id }),
-            &EnqueueOpts::default(),
-        )
-        .await
-        .map_err(ApiError)?;
-    }
-    tx.commit()
-        .await
-        .map_err(tessera_db::map_sqlx)
-        .map_err(ApiError)?;
-
     Ok(IngestResult {
-        document_id: outcome.document.id,
-        deduped: outcome.deduped,
-        status: outcome.document.status,
+        document_id: ingested.document_id,
+        deduped: ingested.deduped,
+        status: ingested.status,
     })
 }
 

@@ -244,7 +244,7 @@ mod tests {
         let secret_start = bad.rfind('_').expect("token has a secret segment") + 1;
         let orig = bad.as_bytes()[secret_start] as char;
         let repl = if orig == 'A' { 'B' } else { 'A' };
-        bad.replace_range(secret_start..secret_start + 1, &repl.to_string());
+        bad.replace_range(secret_start..=secret_start, &repl.to_string());
         let presented = parse_api_token(&bad).expect("still well-formed");
         assert!(!hashes_equal(&presented.presented_hash, &t.hash));
     }

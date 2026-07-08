@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Serve => cli::serve(config).await,
+        Command::McpStdio => cli::mcp_stdio(config).await,
         Command::Migrate => cli::migrate(config).await,
         Command::Doctor => cli::doctor(config).await,
         Command::Token(cmd) => cli::token(config, cmd).await,
