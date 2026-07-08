@@ -22,6 +22,12 @@ services:
       retries: 12
 
   backend:
+    environment:
+      # Clustering knobs (tunable per embedding model / corpus). The default 0.4
+      # suits a diverse corpus; a tighter value separates topically-similar groups
+      # (e.g. distinct campaigns in an all-security corpus).
+      TESSERA__PIPELINE__CLUSTER_MAX_DISTANCE: ${CLUSTER_MAX_DISTANCE:-0.4}
+      TESSERA__PIPELINE__SYNTH_DEBOUNCE_SECS: ${SYNTH_DEBOUNCE:-30}
     depends_on:
       db:
         condition: service_healthy
