@@ -8,3 +8,7 @@ tessera.toml
 /web/node_modules
 /web/.next
 /web/out
+
+# Generated SBOM artifacts (produced in CI, never committed)
+*.cdx.json
+web-sbom.json

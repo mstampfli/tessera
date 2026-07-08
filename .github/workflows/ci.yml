@@ -81,3 +81,30 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: rust sbom (cyclonedx)
+        run: |
+          cargo install --locked cargo-cyclonedx
+          cargo cyclonedx --format json --all
+      - name: web sbom (cyclonedx)
+        working-directory: web
+        run: |
+          npm ci
+          npm sbom --sbom-format cyclonedx > web-sbom.json
+      - name: upload sboms
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            **/*.cdx.json
+            web/web-sbom.json
