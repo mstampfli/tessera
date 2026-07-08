@@ -1,0 +1,90 @@
+"use client";
+
+import Link from "next/link";
+import { use } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+
+export default function EntityDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const detail = useQuery({ queryKey: ["entity", id], queryFn: () => api.entity(id) });
+
+  const e = detail.data?.entity;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <span className="mk-kicker">entity</span>
+        <h1 className="mt-1 break-all font-mono text-2xl">{e?.value ?? "..."}</h1>
+        {e && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm" style={{ color: "var(--mk-text-2)" }}>
+            <span className="mk-tag">{e.kind.replace("hash_", "")}</span>
+            <span>
+              seen in {detail.data?.documents.length ?? 0} documents, {e.mention_count} mentions
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Correlations lead with a table, not a graph: denser and more honest. */}
+      <section>
+        <span className="mk-kicker">top correlations</span>
+        {detail.data && detail.data.neighborhood.length === 0 && (
+          <p className="mt-2 text-sm" style={{ color: "var(--mk-text-3)" }}>
+            no correlations yet.
+          </p>
+        )}
+        {detail.data && detail.data.neighborhood.length > 0 && (
+          <table className="mt-2 w-full text-sm">
+            <thead>
+              <tr className="text-left font-mono text-xs" style={{ color: "var(--mk-text-3)" }}>
+                <th className="pb-2">correlate</th>
+                <th className="pb-2">rel</th>
+                <th className="pb-2 text-right">shared</th>
+                <th className="pb-2 text-right">score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.data.neighborhood.map((n) => (
+                <tr key={n.id} className="border-t" style={{ borderColor: "var(--mk-border)" }}>
+                  <td className="py-2">
+                    <Link
+                      href={`/entities/${n.id}`}
+                      className="font-mono hover:underline"
+                      style={{ color: "var(--mk-accent)" }}
+                    >
+                      <span className="mk-tag mr-2">{n.kind.replace("hash_", "")}</span>
+                      {n.value}
+                    </Link>
+                  </td>
+                  <td className="py-2 font-mono text-xs" style={{ color: "var(--mk-text-3)" }}>
+                    {n.rel}
+                  </td>
+                  <td className="py-2 text-right font-mono" style={{ color: "var(--mk-text-2)" }}>
+                    {n.source_count}
+                  </td>
+                  <td className="py-2 text-right font-mono" style={{ color: "var(--mk-text-2)" }}>
+                    {n.score.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section>
+        <span className="mk-kicker">occurrences</span>
+        <ul className="mt-2 divide-y" style={{ borderColor: "var(--mk-border)" }}>
+          {detail.data?.documents.map((d) => (
+            <li key={d.id} className="py-2">
+              <Link href={`/documents/${d.id}`} className="hover:underline" style={{ color: "var(--mk-text-1)" }}>
+                {d.title ?? d.id}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}

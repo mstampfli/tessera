@@ -140,6 +140,35 @@ export const DocumentSummary = z.object({
 });
 export type DocumentSummary = z.infer<typeof DocumentSummary>;
 
+export const Entity = z.object({
+  id: z.string(),
+  kind: z.string(),
+  value: z.string(),
+  display_value: z.string(),
+  mention_count: z.number(),
+  first_seen: z.string(),
+  last_seen: z.string(),
+});
+export type Entity = z.infer<typeof Entity>;
+
+export const Neighbor = z.object({
+  id: z.string(),
+  kind: z.string(),
+  value: z.string(),
+  display_value: z.string(),
+  rel: z.string(),
+  source_count: z.number(),
+  score: z.number(),
+});
+export type Neighbor = z.infer<typeof Neighbor>;
+
+export const EntityDetail = z.object({
+  entity: Entity,
+  neighborhood: z.array(Neighbor),
+  documents: z.array(z.object({ id: z.string(), title: z.string().nullable() })),
+});
+export type EntityDetail = z.infer<typeof EntityDetail>;
+
 // ---------------- endpoints ---------------------------------------------------
 
 export const api = {
@@ -186,6 +215,15 @@ export const api = {
     request(`/v1/sources/${id}/documents`, z.array(DocumentSummary)),
   document: (id: string) => request(`/v1/documents/${id}`, DocumentView),
   chunks: (id: string) => request(`/v1/documents/${id}/chunks`, z.array(ChunkView)),
+
+  entities: (kind?: string, q?: string) => {
+    const params = new URLSearchParams();
+    if (kind) params.set("kind", kind);
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    return request(`/v1/entities${qs ? `?${qs}` : ""}`, z.array(Entity));
+  },
+  entity: (id: string) => request(`/v1/entities/${id}`, EntityDetail),
 };
 
 // ---------------- live events (SSE) ------------------------------------------

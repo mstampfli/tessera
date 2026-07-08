@@ -32,6 +32,7 @@ pub fn router() -> Router<AppState> {
         .route("/ingest", post(ingest_single))
         .route("/ingest/bulk", post(ingest_bulk))
         .route("/ingest/upload", post(ingest_upload))
+        .route("/ingest/url", post(ingest_url))
 }
 
 #[derive(Debug, Serialize)]
@@ -348,6 +349,59 @@ async fn ingest_upload(
         failed,
         results,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct UrlRequest {
+    url: String,
+    #[serde(default)]
+    source_name: Option<String>,
+}
+
+async fn ingest_url(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Json(req): Json<UrlRequest>,
+) -> Result<Json<IngestResult>, ApiError> {
+    ctx.require(Scope::Ingest)?;
+    check_backpressure(&state).await?;
+
+    // Fetch through the SSRF guard (validates scheme, resolves and rejects
+    // private/loopback/link-local/tailnet addresses, caps size and redirects).
+    let fetched = crate::url_guard::fetch(&req.url).await?;
+    let media_type = fetched
+        .content_type
+        .as_deref()
+        .map(|ct| ct.split(';').next().unwrap_or(ct).trim().to_string());
+
+    let source_id = resolve_source(
+        &state,
+        &ctx,
+        None,
+        req.source_name.as_deref().or(Some("url")),
+        "url",
+    )
+    .await?;
+
+    let item = IngestItem {
+        content: None,
+        content_base64: Some(BASE64.encode(&fetched.bytes)),
+        media_type,
+        title: Some(fetched.final_url.clone()),
+        uri: Some(fetched.final_url),
+        meta: Some(json!({ "fetched_from": req.url })),
+    };
+    let result = ingest_one(&state, source_id, &item).await?;
+
+    let _ = tessera_db::repos::audit::record(
+        &state.db.api,
+        Some(&ctx.audit_id()),
+        "ingest.url",
+        Some(&result.document_id.to_string()),
+        &json!({ "url": req.url, "deduped": result.deduped }),
+    )
+    .await;
+    Ok(Json(result))
 }
 
 /// The source kind to record based on who is ingesting.

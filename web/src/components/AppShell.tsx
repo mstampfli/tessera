@@ -12,6 +12,7 @@ import { JobsTray } from "./JobsTray";
 const NAV = [
   { href: "/", label: "feed" },
   { href: "/search", label: "search" },
+  { href: "/entities", label: "entities" },
   { href: "/sources", label: "sources" },
   { href: "/settings", label: "settings" },
 ];

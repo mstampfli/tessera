@@ -4061,6 +4061,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures",
+ "reqwest",
  "serde",
  "serde_json",
  "tessera-core",
@@ -4074,6 +4075,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "url",
  "uuid",
 ]
 
