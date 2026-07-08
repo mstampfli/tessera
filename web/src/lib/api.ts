@@ -234,8 +234,8 @@ export type GraphNode = z.infer<typeof GraphNode>;
 export const GraphEdge = z.object({
   src_id: z.string(),
   dst_id: z.string(),
-  rel: z.string(),
-  source_count: z.number(),
+  method: z.string(),
+  strength: z.number(),
 });
 export type GraphEdge = z.infer<typeof GraphEdge>;
 

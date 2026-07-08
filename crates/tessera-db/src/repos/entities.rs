@@ -63,6 +63,113 @@ pub async fn graph(
     Ok((nodes, edges))
 }
 
+/// A semantic-similarity edge between two entities: they are discussed in
+/// similar contexts (cosine similarity of their mean mention-chunk embeddings),
+/// even if they never co-occur in the same chunk.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SemanticEdge {
+    pub src_id: Uuid,
+    pub dst_id: Uuid,
+    pub sim: f64,
+}
+
+/// For each entity in `ids`, its `k` most semantically similar peers within the
+/// same set, by cosine similarity of the mean of the entity's mention-chunk
+/// embeddings. Relative (top-k), not an absolute threshold: embeddings of short
+/// technical text cluster tightly, so a fixed cutoff would either connect
+/// everything or nothing; top-k surfaces each entity's nearest peers regardless.
+/// `min_sim` is only a floor to drop near-orthogonal pairs. Bounded work: the
+/// caller passes an already-capped node set, so this is O(cap^2).
+pub async fn semantic_edges(
+    pool: &PgPool,
+    space_id: i16,
+    ids: &[Uuid],
+    k: i64,
+    min_sim: f64,
+) -> Result<Vec<SemanticEdge>> {
+    if ids.len() < 2 {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as::<_, SemanticEdge>(
+        "WITH emb AS (
+             SELECT em.entity_id AS id, avg(ce.embedding) AS v
+             FROM entity_mentions em
+             JOIN chunk_embeddings ce ON ce.chunk_id = em.chunk_id AND ce.space_id = $2
+             WHERE em.entity_id = ANY($1)
+             GROUP BY em.entity_id
+         ),
+         pairs AS (
+             SELECT a.id AS src_id, b.id AS dst_id,
+                    (1.0 - (a.v <=> b.v))::float8 AS sim,
+                    row_number() OVER (PARTITION BY a.id ORDER BY a.v <=> b.v) AS rnk
+             FROM emb a JOIN emb b ON a.id <> b.id
+         )
+         SELECT src_id, dst_id, sim FROM pairs
+         WHERE rnk <= $3 AND sim >= $4",
+    )
+    .bind(ids)
+    .bind(space_id)
+    .bind(k)
+    .bind(min_sim)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)
+}
+
+/// A unified correlation edge: either a direct co-occurrence (strong) or a
+/// semantic similarity (contextual), each with a `strength` in `[0, 1]` so the
+/// UI can render one continuous "how correlated" scale.
+#[derive(Debug, Clone)]
+pub struct CorrelationEdge {
+    pub src_id: Uuid,
+    pub dst_id: Uuid,
+    pub method: &'static str,
+    pub strength: f64,
+}
+
+/// Merge co-occurrence and semantic edges into one strength-scored set. Direct
+/// co-occurrence is the stronger, precise signal and always wins for a pair;
+/// semantic similarity fills in the "slighter" correlations between entities
+/// that never share a chunk. Both endpoints are normalized to one unordered key.
+#[must_use]
+pub fn merge_correlation_edges(
+    cooccurrence: &[GraphEdge],
+    semantic: &[SemanticEdge],
+) -> Vec<CorrelationEdge> {
+    use std::collections::HashMap;
+    let key = |a: Uuid, b: Uuid| if a <= b { (a, b) } else { (b, a) };
+    let mut map: HashMap<(Uuid, Uuid), CorrelationEdge> = HashMap::new();
+
+    for e in cooccurrence {
+        // Direct co-occurrence sits in the strong band; more shared chunks -> stronger.
+        let strength = (0.6 + 0.08 * f64::from(e.source_count)).min(1.0);
+        let (a, b) = key(e.src_id, e.dst_id);
+        map.insert(
+            (a, b),
+            CorrelationEdge {
+                src_id: a,
+                dst_id: b,
+                method: "co_occurs",
+                strength,
+            },
+        );
+    }
+    for s in semantic {
+        if s.src_id == s.dst_id {
+            continue;
+        }
+        let (a, b) = key(s.src_id, s.dst_id);
+        // Only fill a pair the stronger co-occurrence signal did not already claim.
+        map.entry((a, b)).or_insert(CorrelationEdge {
+            src_id: a,
+            dst_id: b,
+            method: "similar",
+            strength: s.sim.clamp(0.0, 1.0),
+        });
+    }
+    map.into_values().collect()
+}
+
 /// Total number of entities (optionally filtered to one kind), so callers can
 /// tell the user how many of the full set a capped graph is showing.
 pub async fn count(pool: &PgPool, kind: Option<&str>) -> Result<i64> {

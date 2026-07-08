@@ -31,8 +31,12 @@ export default function ClusterDetailPage({ params }: { params: Promise<{ id: st
   );
   const graphEdges = useMemo(
     () =>
-      graph.data?.edges.map((e) => ({ source: e.src_id, target: e.dst_id, weight: e.source_count })) ??
-      [],
+      graph.data?.edges.map((e) => ({
+        source: e.src_id,
+        target: e.dst_id,
+        weight: e.strength,
+        method: e.method,
+      })) ?? [],
     [graph.data],
   );
 

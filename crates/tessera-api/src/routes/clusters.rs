@@ -108,8 +108,10 @@ struct GraphNodeView {
 struct GraphEdgeView {
     src_id: Uuid,
     dst_id: Uuid,
-    rel: String,
-    source_count: i32,
+    /// `co_occurs` (direct, strong) or `similar` (semantic, contextual).
+    method: String,
+    /// Correlation strength in `[0, 1]` (edge thickness in the UI).
+    strength: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -118,7 +120,7 @@ struct ClusterGraph {
     edges: Vec<GraphEdgeView>,
 }
 
-/// The cluster's entity co-occurrence network (nodes capped for renderability).
+/// The cluster's entity correlation network (co-occurrence + semantic), capped.
 async fn graph(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -127,7 +129,19 @@ async fn graph(
     ctx.require(Scope::Read)?;
     // Cap nodes so the client graph stays renderable (plan: cluster graph only
     // under ~500 nodes).
-    let (nodes, edges) = clusters::graph(&state.db.api, id, 300).await?;
+    let (nodes, cooccurrence) = clusters::graph(&state.db.api, id, 300).await?;
+
+    let ids: Vec<Uuid> = nodes.iter().map(|n| n.id).collect();
+    let semantic = tessera_db::repos::entities::semantic_edges(
+        &state.db.api,
+        state.space.id,
+        &ids,
+        crate::routes::entities::SEMANTIC_K,
+        crate::routes::entities::SEMANTIC_MIN_SIM,
+    )
+    .await?;
+    let edges = tessera_db::repos::entities::merge_correlation_edges(&cooccurrence, &semantic);
+
     Ok(Json(ClusterGraph {
         nodes: nodes
             .into_iter()
@@ -144,8 +158,8 @@ async fn graph(
             .map(|e| GraphEdgeView {
                 src_id: e.src_id,
                 dst_id: e.dst_id,
-                rel: e.rel,
-                source_count: e.source_count,
+                method: e.method.to_string(),
+                strength: e.strength,
             })
             .collect(),
     }))

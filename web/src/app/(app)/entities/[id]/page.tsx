@@ -30,7 +30,12 @@ export default function EntityDetailPage({ params }: { params: Promise<{ id: str
   const graphEdges = useMemo(
     () =>
       e && detail.data
-        ? detail.data.neighborhood.map((n) => ({ source: e.id, target: n.id, weight: n.score }))
+        ? detail.data.neighborhood.map((n) => ({
+            source: e.id,
+            target: n.id,
+            weight: n.score,
+            method: "co_occurs",
+          }))
         : [],
     [e, detail.data],
   );

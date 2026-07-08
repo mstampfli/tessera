@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import type Graph from "graphology";
 
 export type GraphNode = { id: string; label: string; kind: string; weight: number };
-export type GraphEdge = { source: string; target: string; weight: number };
+// weight is the correlation strength in [0, 1]; method distinguishes a direct
+// co-occurrence from a semantic (contextual) similarity.
+export type GraphEdge = { source: string; target: string; weight: number; method?: string };
 
 // Minimal structural types so we do not depend on sigma's exported type surface.
 type SigmaLike = {
@@ -88,8 +90,10 @@ export function CorrelationGraph({
       const accent = token("--mk-accent", "#e0731d");
       const nodeColor = token("--mk-text-2", "#c7b299");
       const edgeColor = token("--mk-border-strong", "#5a4023");
+      const semanticColor = token("--mk-clay-1", "#3c2a19");
       const dimColor = token("--mk-text-3", "#8d7456");
       const labelColor = token("--mk-text-1", "#f4ead9");
+      const chipBg = token("--mk-surface-2", "#2b1e13");
       const bg = token("--mk-surface-1", "#221810");
 
       const graph: Graph = new GraphCtor({ type: "undirected" });
@@ -113,9 +117,12 @@ export function CorrelationGraph({
         if (e.source === e.target) return;
         if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) return;
         if (graph.hasEdge(e.source, e.target)) return;
+        // Thickness carries the strength; semantic (contextual) edges are drawn
+        // in a quieter colour so direct co-occurrence reads as the stronger link.
+        const semantic = e.method === "similar";
         graph.addEdge(e.source, e.target, {
-          size: 0.6 + (e.weight / maxEdgeW) * 3.4,
-          color: edgeColor,
+          size: 0.5 + (e.weight / maxEdgeW) * 3.5,
+          color: semantic ? semanticColor : edgeColor,
         });
       });
 
@@ -126,6 +133,25 @@ export function CorrelationGraph({
         settings: { ...settings, gravity: 1.2, scalingRatio: 12 },
       });
 
+      // Sigma's built-in hover paints a white label box; on the dark theme the
+      // light label text vanishes on it. Draw our own themed chip instead.
+      const drawHoverLabel = (
+        ctx: CanvasRenderingContext2D,
+        data: { x: number; y: number; size: number; label?: string | null },
+        s: { labelSize?: number; labelFont?: string },
+      ) => {
+        if (!data.label) return;
+        const size = s.labelSize ?? 11;
+        ctx.font = `${size}px ${s.labelFont ?? "ui-monospace, monospace"}`;
+        const textW = ctx.measureText(data.label).width;
+        const px = data.x + data.size + 3;
+        const py = data.y + size / 3;
+        ctx.fillStyle = chipBg;
+        ctx.fillRect(px - 3, py - size, textW + 8, size + 6);
+        ctx.fillStyle = labelColor;
+        ctx.fillText(data.label, px, py);
+      };
+
       if (cancelled || !containerRef.current) return;
       sigma = new SigmaCtor(graph, containerRef.current, {
         renderLabels: true,
@@ -134,6 +160,7 @@ export function CorrelationGraph({
         labelSize: 11,
         defaultNodeColor: nodeColor,
         defaultEdgeColor: edgeColor,
+        defaultDrawNodeHover: drawHoverLabel,
         minCameraRatio: 0.3,
         maxCameraRatio: 3,
       }) as unknown as SigmaLike;

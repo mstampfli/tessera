@@ -43,8 +43,12 @@ export default function GraphPage() {
   );
   const graphEdges = useMemo(
     () =>
-      q.data?.edges.map((e) => ({ source: e.src_id, target: e.dst_id, weight: e.source_count })) ??
-      [],
+      q.data?.edges.map((e) => ({
+        source: e.src_id,
+        target: e.dst_id,
+        weight: e.strength,
+        method: e.method,
+      })) ?? [],
     [q.data],
   );
 
@@ -56,10 +60,13 @@ export default function GraphPage() {
       .filter((e) => e.src_id === selectedId || e.dst_id === selectedId)
       .map((e) => {
         const otherId = e.src_id === selectedId ? e.dst_id : e.src_id;
-        return { node: byId.get(otherId), weight: e.source_count };
+        return { node: byId.get(otherId), strength: e.strength, method: e.method };
       })
-      .filter((x): x is { node: NonNullable<typeof x.node>; weight: number } => Boolean(x.node))
-      .sort((a, b) => b.weight - a.weight);
+      .filter(
+        (x): x is { node: NonNullable<typeof x.node>; strength: number; method: string } =>
+          Boolean(x.node),
+      )
+      .sort((a, b) => b.strength - a.strength);
   }, [q.data, selectedId]);
 
   const shown = q.data?.nodes.length ?? 0;
@@ -152,22 +159,33 @@ export default function GraphPage() {
                 <>
                   <p className="mk-kicker mt-4">correlated with</p>
                   <ul className="mt-2 space-y-1">
-                    {neighbors.slice(0, 20).map(({ node, weight }) => (
+                    {neighbors.slice(0, 20).map(({ node, strength, method }) => (
                       <li key={node.id}>
                         <button
                           className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs hover:underline"
                           onClick={() => setSelectedId(node.id)}
                           style={{ color: "var(--mk-text-2)" }}
+                          title={method === "similar" ? "contextual similarity" : "co-occurs directly"}
                         >
                           <span className="mk-tag">{node.kind.replace("hash_", "")}</span>
                           <span className="truncate font-mono">{node.value}</span>
-                          <span className="ml-auto font-mono" style={{ color: "var(--mk-text-3)" }}>
-                            {weight}
+                          <span
+                            className="ml-auto font-mono"
+                            style={{
+                              color: method === "similar" ? "var(--mk-text-3)" : "var(--mk-accent)",
+                            }}
+                          >
+                            {Math.round(strength * 100)}
+                            {method === "similar" ? "~" : ""}
                           </span>
                         </button>
                       </li>
                     ))}
                   </ul>
+                  <p className="mt-2 text-[11px]" style={{ color: "var(--mk-text-3)" }}>
+                    number = correlation strength (0-100). ~ marks a contextual
+                    (semantic) link; solid values are direct co-occurrences.
+                  </p>
                 </>
               )}
             </div>
