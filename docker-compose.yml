@@ -1,0 +1,30 @@
+# Development stack: Postgres 17 with pgvector, for local `tesserad` runs.
+#
+# The DB is published only on loopback. Bring it up with:
+#   docker compose up -d
+# then run the app on the host with `tesserad serve`.
+#
+# Note: on this machine the shell's DOCKER_HOST points at a podman socket; use
+# the real Docker daemon explicitly, e.g.
+#   DOCKER_HOST=unix:///var/run/docker.sock docker compose up -d
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tessera
+      POSTGRES_PASSWORD: tessera
+      POSTGRES_DB: tessera
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tessera -d tessera"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

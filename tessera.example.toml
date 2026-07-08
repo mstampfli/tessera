@@ -1,0 +1,25 @@
+# Example tessera.toml. Copy to tessera.toml and adjust. This file holds
+# non-secret configuration only; the database URL comes from DATABASE_URL and
+# the admin password from TESSERA_ADMIN_PASSWORD or stdin.
+
+[server]
+# Address the API binds to. Loopback for local dev; in production set this to
+# the host's tailnet IP so the port is never on a public or LAN interface.
+bind = "127.0.0.1:8080"
+# Set true in production (behind Caddy TLS) so session cookies carry `Secure`.
+secure_cookies = false
+
+[database]
+# Overridden by DATABASE_URL when set. Shown here for reference only.
+url = "postgres://tessera:tessera@127.0.0.1:5432/tessera"
+max_connections = 10
+worker_max_connections = 6
+
+[cas]
+# Filesystem root of the content-addressed store for raw ingested bytes.
+path = "./data/cas"
+
+[log]
+# "pretty" for local dev, "json" for production.
+format = "pretty"
+filter = "info,tessera=debug,sqlx=warn"

@@ -1,0 +1,16 @@
+[package]
+name = "tessera-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "MCP server exposing tessera to AI agents (ingest, search, ask, insights, entity neighborhood) over stdio and streamable HTTP."
+
+[dependencies]
+tessera-core.workspace = true
+tessera-db.workspace = true
+
+[lints]
+workspace = true

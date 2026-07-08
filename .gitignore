@@ -1,0 +1,10 @@
+/target
+/data
+.env
+tessera.toml
+*.log
+
+# Frontend (added in M1)
+/web/node_modules
+/web/.next
+/web/out

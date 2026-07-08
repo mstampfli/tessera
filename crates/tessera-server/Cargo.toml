@@ -1,0 +1,30 @@
+[package]
+name = "tessera-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "tesserad: the single binary that serves the API + MCP + pipeline workers, and the operator CLI (serve, migrate, token, user, doctor)."
+default-run = "tesserad"
+
+[[bin]]
+name = "tesserad"
+path = "src/main.rs"
+
+[dependencies]
+tessera-core.workspace = true
+tessera-db.workspace = true
+tessera-api.workspace = true
+tokio.workspace = true
+axum.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

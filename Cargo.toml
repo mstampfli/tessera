@@ -1,0 +1,87 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mstampfli/tessera"
+authors = ["Marc Stampfli <marc.kurt.stampfli@icloud.com>"]
+
+[workspace.dependencies]
+# Internal crates
+tessera-core = { path = "crates/tessera-core" }
+tessera-db = { path = "crates/tessera-db" }
+tessera-extract = { path = "crates/tessera-extract" }
+tessera-providers = { path = "crates/tessera-providers" }
+tessera-pipeline = { path = "crates/tessera-pipeline" }
+tessera-search = { path = "crates/tessera-search" }
+tessera-api = { path = "crates/tessera-api" }
+tessera-mcp = { path = "crates/tessera-mcp" }
+
+# Async runtime + web
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "limit", "request-id", "timeout", "util"] }
+
+# Database
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "macros",
+    "uuid",
+    "chrono",
+    "json",
+    "migrate",
+] }
+pgvector = { version = "0.4", features = ["sqlx"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# Ids + time + hashing + crypto
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+blake3 = "1"
+argon2 = "0.5"
+rand = "0.9"
+subtle = "2"
+zeroize = { version = "1", features = ["derive"] }
+base64 = "0.22"
+
+# Config + CLI
+figment = { version = "0.10", features = ["toml", "env"] }
+clap = { version = "4", features = ["derive", "env"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# HTTP client (providers, doctor)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+
+async-trait = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Baseline: pedantic as warnings, real bug-classes denied. Tuned to stay low-noise.
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

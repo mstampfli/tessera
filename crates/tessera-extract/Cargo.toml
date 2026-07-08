@@ -1,0 +1,18 @@
+[package]
+name = "tessera-extract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Content sniffing, chunking, built-in extractors, the security entity pack, and the subprocess plugin host. All ingested bytes are untrusted."
+
+[dependencies]
+tessera-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

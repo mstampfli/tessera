@@ -1,0 +1,17 @@
+[package]
+name = "tessera-search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Hybrid retrieval (vector + full-text, fused with Reciprocal Rank Fusion) and ask-with-citations over the knowledge base."
+
+[dependencies]
+tessera-core.workspace = true
+tessera-db.workspace = true
+tessera-providers.workspace = true
+
+[lints]
+workspace = true
