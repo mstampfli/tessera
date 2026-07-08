@@ -1,11 +1,17 @@
-//! Extraction: turn untrusted raw bytes into a stream of normalized
-//! [`tessera_core::ExtractEvent`]s.
+//! Extraction: turn untrusted raw bytes into a title plus normalized chunks.
 //!
-//! M0 establishes the [`Extractor`] seam and the content-sniffing type. The
-//! built-in extractors (text, markdown, json, csv, log, html, pdf), the shared
-//! chunker, the security entity pack, and the sandboxed subprocess plugin host
-//! land in M1 and M2. Every extractor treats its input as hostile: bounded
-//! readers, per-event size caps, and one shared `clean_text` primitive.
+//! The [`Extractor`] trait is the seam for the future subprocess plugin host
+//! (M2). The M1 built-in path is [`normalize`], which sniffs the content type
+//! and dispatches to the per-format extractors. Every extractor treats its input
+//! as hostile: bounded work, lossy UTF-8 decoding, and no execution of content.
+
+pub mod chunk;
+pub mod extractors;
+pub mod sniff;
+
+pub use chunk::PreparedChunk;
+pub use extractors::{normalize, Prepared};
+pub use sniff::sniff;
 
 use tessera_core::ExtractEvent;
 

@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Pluggable AI provider layer: capability traits (embed, generate) with fastembed / Ollama / claude-cli implementations behind them."
+description = "Pluggable AI provider layer: capability traits (embed, generate) with Ollama / claude-cli / fastembed implementations behind them."
 
 [dependencies]
 tessera-core.workspace = true
@@ -14,6 +14,18 @@ async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# In-process ONNX embeddings. Feature-gated: it pulls a large native/codec tree
+# and downloads an onnxruntime binary, so the lean default build uses the Ollama
+# embedder instead. Enable `--features fastembed` for the in-process backend.
+fastembed = { version = "5", optional = true }
+
+[features]
+default = []
+fastembed = ["dep:fastembed"]
 
 [lints]
 workspace = true

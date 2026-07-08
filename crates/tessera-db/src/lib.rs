@@ -5,6 +5,8 @@
 //! the pool that serves user requests. Both use `min_connections = 0`, so the
 //! second pool costs nothing until the pipeline (M1) starts using it.
 
+pub mod cas;
+pub mod queue;
 pub mod repos;
 
 use std::time::Duration;
@@ -74,3 +76,16 @@ impl Db {
         Ok(())
     }
 }
+
+/// Connect a dedicated LISTEN connection to a NOTIFY channel. Returned to the
+/// caller, which drives `recv()` and forwards payloads (e.g. to the SSE bus).
+pub async fn listen(url: &str, channel: &str) -> Result<sqlx::postgres::PgListener, Error> {
+    let mut listener = sqlx::postgres::PgListener::connect(url)
+        .await
+        .map_err(map_sqlx)?;
+    listener.listen(channel).await.map_err(map_sqlx)?;
+    Ok(listener)
+}
+
+/// The NOTIFY channel pipeline stages publish progress on.
+pub const EVENTS_CHANNEL: &str = "tessera_events";

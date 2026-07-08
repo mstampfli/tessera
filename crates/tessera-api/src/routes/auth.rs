@@ -1,13 +1,15 @@
 //! Session auth for the web UI: login, logout, and whoami.
 
-use axum::extract::State;
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tessera_core::error::Error;
+use tessera_core::error::{Error, ErrorKind};
 use tessera_core::secret;
 
 use crate::auth::{cookie_from_headers, AuthContext, Principal, SESSION_COOKIE};
@@ -30,6 +32,20 @@ struct LoginRequest {
     password: String,
 }
 
+/// Determine the client IP for rate limiting: the first `X-Forwarded-For` hop
+/// (set by our trusted reverse proxy) if present, else the direct peer.
+fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> String {
+    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first) = xff.split(',').next() {
+            let ip = first.trim();
+            if !ip.is_empty() {
+                return ip.to_string();
+            }
+        }
+    }
+    peer.ip().to_string()
+}
+
 fn set_cookie(value: &str, secure: bool, max_age_secs: i64) -> String {
     let mut c =
         format!("{SESSION_COOKIE}={value}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age_secs}");
@@ -41,8 +57,20 @@ fn set_cookie(value: &str, secure: bool, max_age_secs: i64) -> String {
 
 async fn login(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // Rate-limit by client IP to blunt password brute force (STRIDE spoofing).
+    // Prefer the proxy-forwarded client IP when present (we sit behind Caddy).
+    let client_ip = client_ip(&headers, peer);
+    if !state.login_limiter.check(&client_ip) {
+        return Err(ApiError(Error::new(
+            ErrorKind::RateLimited,
+            "too many login attempts, slow down",
+        )));
+    }
+
     let user = tessera_db::repos::users::by_username(&state.db.api, &req.username)
         .await?
         // Uniform error whether the user is missing or the password is wrong, so

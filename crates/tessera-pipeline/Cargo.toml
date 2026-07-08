@@ -14,7 +14,10 @@ tessera-db.workspace = true
 tessera-extract.workspace = true
 tessera-providers.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

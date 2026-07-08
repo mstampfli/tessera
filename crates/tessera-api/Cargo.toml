@@ -11,15 +11,22 @@ description = "The axum HTTP API: auth middleware, REST handlers, SSE, and the s
 [dependencies]
 tessera-core.workspace = true
 tessera-db.workspace = true
+tessera-extract.workspace = true
+tessera-providers.workspace = true
+tessera-search.workspace = true
+tessera-pipeline.workspace = true
 axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tracing.workspace = true
+base64.workspace = true
 
 [lints]
 workspace = true

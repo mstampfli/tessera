@@ -1,14 +1,20 @@
 //! CLI definition and command implementations for `tesserad`.
 
 use std::io::{IsTerminal, Write};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
-use tessera_api::AppState;
+use tessera_api::events::EventBus;
+use tessera_api::{AppState, AppStateParts};
 use tessera_core::config::Config;
+use tessera_db::cas::CasStore;
+use tessera_db::repos::embeddings;
 use tessera_db::Db;
+use tokio::task::JoinHandle;
 
 /// tessera daemon and operator CLI.
 #[derive(Debug, Parser)]
@@ -118,25 +124,102 @@ pub async fn serve(config: Config) -> Result<()> {
         .await
         .map_err(|e| anyhow!(e.to_string()))
         .context("applying migrations")?;
-
-    // Ensure the CAS root exists and is writable before accepting traffic.
     ensure_cas_writable(&config).context("checking content store")?;
 
-    let bind = config.server.bind;
-    let state = AppState::new(db, Arc::new(config));
-    let app = tessera_api::build_router(state);
+    let cas = CasStore::open(&config.cas.path).map_err(|e| anyhow!(e.to_string()))?;
 
+    // Build the active embedding provider and register its space (+ HNSW index).
+    let embedder = tessera_providers::build_embedder(&config.providers)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))
+        .context("initializing embedding provider")?;
+    let info = embedder.space().clone();
+    let mut space = embeddings::ensure(
+        &db.api,
+        &info.name,
+        &config.providers.embedder,
+        i32::try_from(info.dim).unwrap_or(i32::MAX),
+        info.metric,
+    )
+    .await
+    .map_err(|e| anyhow!(e.to_string()))?;
+    embeddings::ensure_hnsw_index(&db.api, space.id, space.dim)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
+    embeddings::set_active(&db.api, space.id)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
+    space.active = true;
+    tracing::info!(space = %space.name, dim = space.dim, "embedding space active");
+
+    let llm = tessera_providers::build_llm(&config.providers)
+        .map_err(|e| anyhow!(e.to_string()))
+        .context("initializing llm provider")?;
+
+    let bind = config.server.bind;
+    let workers = config.pipeline.workers;
+    let embed_batch = config.pipeline.embed_batch;
+    let db_url = config.database.url.clone();
+
+    let state = AppState::new(AppStateParts {
+        db: db.clone(),
+        config: Arc::new(config),
+        cas: cas.clone(),
+        embedder: embedder.clone(),
+        llm,
+        space: space.clone(),
+    });
+
+    // Forward Postgres NOTIFY progress into the SSE event bus.
+    let forwarder = spawn_event_forwarder(db_url, state.events.clone());
+
+    // Start the pipeline workers.
+    let pipeline_ctx =
+        tessera_pipeline::PipelineContext::new(db, cas, embedder, space.id, embed_batch);
+    let pipeline = tessera_pipeline::run_pipeline(pipeline_ctx, workers);
+
+    let app = tessera_api::build_router(state);
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .with_context(|| format!("binding {bind}"))?;
     tracing::info!(%bind, "tesserad listening");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("server error")?;
+    // Connect-info make service so handlers can see the client IP (login limit).
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("server error")?;
+
+    tracing::info!("shutting down pipeline");
+    pipeline.shutdown().await;
+    forwarder.abort();
     tracing::info!("tesserad stopped");
     Ok(())
+}
+
+/// Spawn a task that keeps a Postgres LISTEN connection open and republishes
+/// every NOTIFY payload to the in-process event bus, reconnecting on failure.
+fn spawn_event_forwarder(url: String, events: EventBus) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            match tessera_db::listen(&url, tessera_db::EVENTS_CHANNEL).await {
+                Ok(mut listener) => loop {
+                    match listener.recv().await {
+                        Ok(note) => events.publish(note.payload().to_string()),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "event listener dropped, reconnecting");
+                            break;
+                        }
+                    }
+                },
+                Err(e) => tracing::warn!(error = %e, "event listener connect failed, retrying"),
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    })
 }
 
 /// Apply migrations and exit (the one-shot compose `migrate` service).
@@ -183,6 +266,27 @@ pub async fn doctor(config: Config) -> Result<()> {
     std::io::stdout().flush().ok();
     match ensure_cas_writable(&config) {
         Ok(()) => println!("ok"),
+        Err(e) => println!("FAIL ({e})"),
+    }
+
+    print!("  embedding provider     ... ");
+    std::io::stdout().flush().ok();
+    match tessera_providers::build_embedder(&config.providers).await {
+        Ok(embedder) => {
+            let space = embedder.space();
+            println!("ok ({}, dim {})", space.name, space.dim);
+        }
+        Err(e) => println!("FAIL ({e})"),
+    }
+
+    print!("  llm provider           ... ");
+    std::io::stdout().flush().ok();
+    match tessera_providers::build_llm(&config.providers) {
+        Ok(llm) => match llm.health().await {
+            tessera_providers::ProviderHealth::Up => println!("ok"),
+            tessera_providers::ProviderHealth::Degraded(r) => println!("degraded ({r})"),
+            tessera_providers::ProviderHealth::Down(r) => println!("down ({r})"),
+        },
         Err(e) => println!("FAIL ({e})"),
     }
     Ok(())

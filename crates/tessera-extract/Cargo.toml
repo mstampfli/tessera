@@ -13,6 +13,11 @@ tessera-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+text-splitter = { version = "0.32.0", features = ["markdown"] }
+pulldown-cmark = "0.13.4"
+csv = "1.4.0"
+infer = "0.19.0"
+scraper = "0.27.0"
 
 [lints]
 workspace = true

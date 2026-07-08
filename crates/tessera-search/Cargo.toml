@@ -12,6 +12,10 @@ description = "Hybrid retrieval (vector + full-text, fused with Reciprocal Rank 
 tessera-core.workspace = true
 tessera-db.workspace = true
 tessera-providers.workspace = true
+sqlx.workspace = true
+pgvector.workspace = true
+uuid.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true

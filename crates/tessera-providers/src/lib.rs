@@ -7,8 +7,17 @@
 //! cannot embed and an ONNX embedder cannot generate, so a single trait would
 //! force dishonest `unimplemented!()` holes.
 //!
-//! M0 defines the seams and their health/error types. Concrete providers and
-//! the fallback-chain registry land in M1 (embedding + ask) and M3 (synthesis).
+//! The seams and their health/error types live here; concrete backends live in
+//! the submodules and are constructed via [`build`].
+
+pub mod build;
+pub mod chain;
+pub mod claude_cli;
+#[cfg(feature = "fastembed")]
+pub mod fastembed_embedder;
+pub mod ollama;
+
+pub use build::{build_embedder, build_llm};
 
 use async_trait::async_trait;
 
@@ -99,7 +108,7 @@ pub struct GenResponse {
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     /// Stable id of this provider, e.g. `claude_cli` or `ollama`.
-    fn id(&self) -> &str;
+    fn id(&self) -> &'static str;
 
     /// Generate a completion.
     async fn generate(&self, req: &GenRequest) -> Result<GenResponse, ProviderError>;

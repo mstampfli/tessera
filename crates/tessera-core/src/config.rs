@@ -21,6 +21,154 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub cas: CasConfig,
     pub log: LogConfig,
+    #[serde(default)]
+    pub providers: ProvidersConfig,
+    #[serde(default)]
+    pub pipeline: PipelineConfig,
+}
+
+/// Configuration for the pluggable AI provider layer. These are plain strings
+/// (endpoints, model names, binary paths); the provider crate interprets them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvidersConfig {
+    /// Which embedding backend to use: `ollama` (default) or `fastembed`.
+    #[serde(default = "default_embedder")]
+    pub embedder: String,
+    /// Ordered LLM providers to try for generation (first that succeeds wins).
+    #[serde(default = "default_llm_chain")]
+    pub llm_chain: Vec<String>,
+    #[serde(default)]
+    pub ollama: OllamaConfig,
+    #[serde(default)]
+    pub fastembed: FastembedConfig,
+    #[serde(default)]
+    pub claude_cli: ClaudeCliConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaConfig {
+    #[serde(default = "default_ollama_url")]
+    pub base_url: String,
+    #[serde(default = "default_ollama_embed_model")]
+    pub embed_model: String,
+    #[serde(default = "default_ollama_chat_model")]
+    pub chat_model: String,
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FastembedConfig {
+    #[serde(default = "default_fastembed_model")]
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeCliConfig {
+    #[serde(default = "default_claude_bin")]
+    pub bin: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default = "default_claude_timeout_secs")]
+    pub timeout_secs: u64,
+    /// Max concurrent CLI invocations (it rides the subscription).
+    #[serde(default = "default_claude_concurrency")]
+    pub max_concurrency: usize,
+}
+
+/// Pipeline worker configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineConfig {
+    /// Number of concurrent worker tasks.
+    #[serde(default = "default_workers")]
+    pub workers: usize,
+    /// How many chunk ids go into one embedding job batch.
+    #[serde(default = "default_embed_batch")]
+    pub embed_batch: usize,
+}
+
+fn default_embedder() -> String {
+    "ollama".to_string()
+}
+fn default_llm_chain() -> Vec<String> {
+    vec!["ollama".to_string()]
+}
+fn default_ollama_url() -> String {
+    "http://127.0.0.1:11434".to_string()
+}
+fn default_ollama_embed_model() -> String {
+    "nomic-embed-text".to_string()
+}
+fn default_ollama_chat_model() -> String {
+    "qwen2.5:3b".to_string()
+}
+fn default_timeout_secs() -> u64 {
+    120
+}
+fn default_fastembed_model() -> String {
+    "bge-small-en-v1.5".to_string()
+}
+fn default_claude_bin() -> String {
+    "claude".to_string()
+}
+fn default_claude_timeout_secs() -> u64 {
+    180
+}
+fn default_claude_concurrency() -> usize {
+    1
+}
+fn default_workers() -> usize {
+    4
+}
+fn default_embed_batch() -> usize {
+    64
+}
+
+impl Default for ProvidersConfig {
+    fn default() -> Self {
+        Self {
+            embedder: default_embedder(),
+            llm_chain: default_llm_chain(),
+            ollama: OllamaConfig::default(),
+            fastembed: FastembedConfig::default(),
+            claude_cli: ClaudeCliConfig::default(),
+        }
+    }
+}
+impl Default for OllamaConfig {
+    fn default() -> Self {
+        Self {
+            base_url: default_ollama_url(),
+            embed_model: default_ollama_embed_model(),
+            chat_model: default_ollama_chat_model(),
+            timeout_secs: default_timeout_secs(),
+        }
+    }
+}
+impl Default for FastembedConfig {
+    fn default() -> Self {
+        Self {
+            model: default_fastembed_model(),
+        }
+    }
+}
+impl Default for ClaudeCliConfig {
+    fn default() -> Self {
+        Self {
+            bin: default_claude_bin(),
+            model: None,
+            timeout_secs: default_claude_timeout_secs(),
+            max_concurrency: default_claude_concurrency(),
+        }
+    }
+}
+impl Default for PipelineConfig {
+    fn default() -> Self {
+        Self {
+            workers: default_workers(),
+            embed_batch: default_embed_batch(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +248,8 @@ impl Default for Config {
                 format: default_log_format(),
                 filter: default_log_filter(),
             },
+            providers: ProvidersConfig::default(),
+            pipeline: PipelineConfig::default(),
         }
     }
 }

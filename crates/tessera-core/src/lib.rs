@@ -9,9 +9,11 @@
 pub mod config;
 pub mod error;
 pub mod extract_event;
+pub mod hash;
 pub mod ids;
 pub mod secret;
 
 pub use error::{Error, ErrorKind, Result};
 pub use extract_event::ExtractEvent;
+pub use hash::ContentHash;
 pub use ids::new_id;
