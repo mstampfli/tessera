@@ -222,26 +222,35 @@ export const ClusterDetail = z.object({
 });
 export type ClusterDetail = z.infer<typeof ClusterDetail>;
 
+export const GraphNode = z.object({
+  id: z.string(),
+  kind: z.string(),
+  value: z.string(),
+  display_value: z.string(),
+  weight: z.number(),
+});
+export type GraphNode = z.infer<typeof GraphNode>;
+
+export const GraphEdge = z.object({
+  src_id: z.string(),
+  dst_id: z.string(),
+  rel: z.string(),
+  source_count: z.number(),
+});
+export type GraphEdge = z.infer<typeof GraphEdge>;
+
 export const ClusterGraph = z.object({
-  nodes: z.array(
-    z.object({
-      id: z.string(),
-      kind: z.string(),
-      value: z.string(),
-      display_value: z.string(),
-      weight: z.number(),
-    }),
-  ),
-  edges: z.array(
-    z.object({
-      src_id: z.string(),
-      dst_id: z.string(),
-      rel: z.string(),
-      source_count: z.number(),
-    }),
-  ),
+  nodes: z.array(GraphNode),
+  edges: z.array(GraphEdge),
 });
 export type ClusterGraph = z.infer<typeof ClusterGraph>;
+
+export const EntityGraph = z.object({
+  nodes: z.array(GraphNode),
+  edges: z.array(GraphEdge),
+  total: z.number(),
+});
+export type EntityGraph = z.infer<typeof EntityGraph>;
 
 // ---------------- endpoints ---------------------------------------------------
 
@@ -311,6 +320,13 @@ export const api = {
   clusters: () => request("/v1/clusters", z.array(Cluster)),
   cluster: (id: string) => request(`/v1/clusters/${id}`, ClusterDetail),
   clusterGraph: (id: string) => request(`/v1/clusters/${id}/graph`, ClusterGraph),
+  graph: (kind?: string, limit?: number) => {
+    const p = new URLSearchParams();
+    if (kind) p.set("kind", kind);
+    if (limit) p.set("limit", String(limit));
+    const qs = p.toString();
+    return request(`/v1/graph${qs ? `?${qs}` : ""}`, EntityGraph);
+  },
 };
 
 // ---------------- live events (SSE) ------------------------------------------

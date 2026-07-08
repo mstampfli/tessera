@@ -12,6 +12,68 @@ use tessera_core::error::Result;
 use uuid::Uuid;
 
 use crate::map_sqlx;
+use crate::repos::clusters::{GraphEdge, GraphNode};
+
+/// The global entity correlation graph: the most-connected entities (optionally
+/// filtered to one kind) capped at `node_cap`, and the co-occurrence edges among
+/// exactly that node set. Nodes are ranked by degree (edge count) so a capped
+/// view shows the hubs first; isolated entities fall to the tail. Edges are
+/// restricted to the returned nodes, so the graph is always self-consistent.
+pub async fn graph(
+    pool: &PgPool,
+    kind: Option<&str>,
+    node_cap: i64,
+) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)> {
+    let nodes = sqlx::query_as::<_, GraphNode>(
+        "SELECT e.id, e.kind, e.value, e.display_value, e.mention_count::bigint AS weight
+         FROM entities e
+         LEFT JOIN (
+             SELECT id, count(*) AS deg FROM (
+                 SELECT src_id AS id FROM entity_edges
+                 UNION ALL
+                 SELECT dst_id AS id FROM entity_edges
+             ) x GROUP BY id
+         ) d ON d.id = e.id
+         WHERE ($1::text IS NULL OR e.kind = $1)
+         ORDER BY COALESCE(d.deg, 0) DESC, e.mention_count DESC, e.id
+         LIMIT $2",
+    )
+    .bind(kind)
+    .bind(node_cap)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+
+    if nodes.is_empty() {
+        return Ok((nodes, Vec::new()));
+    }
+
+    let ids: Vec<Uuid> = nodes.iter().map(|n| n.id).collect();
+    let edges = sqlx::query_as::<_, GraphEdge>(
+        "SELECT edge.src_id, edge.dst_id, edge.rel, edge.source_count
+         FROM entity_edges edge
+         WHERE edge.src_id = ANY($1) AND edge.dst_id = ANY($1)
+         ORDER BY edge.source_count DESC, edge.src_id, edge.dst_id",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+
+    Ok((nodes, edges))
+}
+
+/// Total number of entities (optionally filtered to one kind), so callers can
+/// tell the user how many of the full set a capped graph is showing.
+pub async fn count(pool: &PgPool, kind: Option<&str>) -> Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*)::bigint FROM entities WHERE ($1::text IS NULL OR kind = $1)",
+    )
+    .bind(kind)
+    .fetch_one(pool)
+    .await
+    .map_err(map_sqlx)
+}
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Entity {

@@ -13,6 +13,7 @@ const NAV = [
   { href: "/", label: "feed" },
   { href: "/search", label: "search" },
   { href: "/entities", label: "entities" },
+  { href: "/graph", label: "graph" },
   { href: "/clusters", label: "clusters" },
   { href: "/sources", label: "sources" },
   { href: "/settings", label: "settings" },

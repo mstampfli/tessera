@@ -18,6 +18,7 @@ pub fn router() -> Router<AppState> {
         .route("/entities", get(list))
         .route("/entities/{id}", get(detail))
         .route("/entities/{id}/neighborhood", get(neighborhood))
+        .route("/graph", get(graph))
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,4 +137,74 @@ async fn neighborhood(
     ctx.require(Scope::Read)?;
     let rows = entities::neighborhood(&state.db.api, id, 100).await?;
     Ok(Json(rows.into_iter().map(neighbor_view).collect()))
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphParams {
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphNodeView {
+    id: Uuid,
+    kind: String,
+    value: String,
+    display_value: String,
+    weight: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphEdgeView {
+    src_id: Uuid,
+    dst_id: Uuid,
+    rel: String,
+    source_count: i32,
+}
+
+#[derive(Debug, Serialize)]
+struct EntityGraph {
+    nodes: Vec<GraphNodeView>,
+    edges: Vec<GraphEdgeView>,
+    /// Total entities matching the filter, so the client can say how much of the
+    /// full set a capped graph is showing.
+    total: i64,
+}
+
+/// The global entity correlation graph (most-connected first, capped).
+async fn graph(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Query(params): Query<GraphParams>,
+) -> Result<Json<EntityGraph>, ApiError> {
+    ctx.require(Scope::Read)?;
+    let kind = params.kind.as_deref().filter(|s| !s.is_empty());
+    // Cap nodes so a large corpus renders as the top hubs, not a hairball.
+    let cap = params.limit.unwrap_or(200).clamp(1, 1000);
+    let (nodes, edges) = entities::graph(&state.db.api, kind, cap).await?;
+    let total = entities::count(&state.db.api, kind).await?;
+    Ok(Json(EntityGraph {
+        nodes: nodes
+            .into_iter()
+            .map(|n| GraphNodeView {
+                id: n.id,
+                kind: n.kind,
+                value: n.value,
+                display_value: n.display_value,
+                weight: n.weight,
+            })
+            .collect(),
+        edges: edges
+            .into_iter()
+            .map(|e| GraphEdgeView {
+                src_id: e.src_id,
+                dst_id: e.dst_id,
+                rel: e.rel,
+                source_count: e.source_count,
+            })
+            .collect(),
+        total,
+    }))
 }
