@@ -9,9 +9,11 @@ server for AI agents).
 A tessera is a single tile of a mosaic. The engine assembles many small,
 disconnected tiles of data into a picture you can act on.
 
-> Status: early. Milestone M0 (foundation) is in place: the workspace, the full
-> database schema, configuration, the auth model (API tokens and sessions), and
-> the operator CLI. Ingestion and search land in M1. See the roadmap below.
+> Status: the planned build (M0 through M4) is complete: ingestion, hybrid
+> search, ask-with-citations, the security entity graph and correlation edges,
+> incremental clustering, cited insight cards, the web UI, and the MCP server all
+> work end to end, and the stack is deployable behind a TLS reverse proxy on a
+> private tailnet. See the roadmap below.
 
 ## Why
 
@@ -109,6 +111,9 @@ npm run dev   # http://localhost:3000, proxies /api to the core on :8080
 
 Sign in with the user from step 3, then ingest by dropping files or pasting data,
 watch the pipeline progress live, and search or ask over what you have ingested.
+Entity and cluster pages lead with a correlation table and offer an opt-in
+network graph of the same data, so the campaign structure and the bridge
+entities that link separate incidents are visible at a glance.
 
 ### For AI agents (MCP)
 
@@ -119,6 +124,10 @@ local agent over stdio:
 ```sh
 claude mcp add tessera -- tesserad mcp-stdio
 ```
+
+Remote agents on the tailnet use the same tools over HTTP: a JSON-RPC 2.0
+endpoint at `POST /mcp`, authenticated with a bearer token carrying the `mcp`
+scope.
 
 Tools: `tessera_ingest`, `tessera_search`, `tessera_ask`,
 `tessera_list_insights`, `tessera_get_entity_neighborhood`, `tessera_job_status`.
@@ -139,6 +148,10 @@ docker compose -f docker-compose.prod.yml up -d --build
 the frontend. On a CPU-only host with no Ollama (for example a small VPS), build
 the backend with in-process embeddings: `BACKEND_FEATURES=fastembed` and
 `EMBEDDER=fastembed` in `.env`.
+
+The backend exposes Prometheus metrics at `/metrics` (HTTP request rates and
+latencies, per-stage job counts and durations, and the queue depth) for a
+tailnet scraper.
 
 Back up and restore the database and content store:
 
