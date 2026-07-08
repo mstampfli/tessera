@@ -169,6 +169,59 @@ export const EntityDetail = z.object({
 });
 export type EntityDetail = z.infer<typeof EntityDetail>;
 
+export const Insight = z.object({
+  id: z.string(),
+  cluster_id: z.string().nullable(),
+  title: z.string(),
+  body_md: z.string(),
+  severity: z.string(),
+  confidence: z.number(),
+  suggested_actions: z.array(z.string()),
+  tags: z.array(z.string()),
+  status: z.string(),
+  model: z.string(),
+  created_at: z.string(),
+});
+export type Insight = z.infer<typeof Insight>;
+
+export const InsightEvidence = z.object({
+  chunk_id: z.string(),
+  document_id: z.string(),
+  title: z.string().nullable(),
+  seq: z.number(),
+  excerpt: z.string(),
+});
+export type InsightEvidence = z.infer<typeof InsightEvidence>;
+
+export const InsightDetail = z.object({
+  insight: Insight,
+  evidence: z.array(InsightEvidence),
+});
+export type InsightDetail = z.infer<typeof InsightDetail>;
+
+export const Cluster = z.object({
+  id: z.string(),
+  size: z.number(),
+  label: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type Cluster = z.infer<typeof Cluster>;
+
+export const ClusterMember = z.object({
+  chunk_id: z.string(),
+  document_id: z.string(),
+  title: z.string().nullable(),
+  excerpt: z.string(),
+  similarity: z.number(),
+});
+
+export const ClusterDetail = z.object({
+  cluster: Cluster,
+  members: z.array(ClusterMember),
+});
+export type ClusterDetail = z.infer<typeof ClusterDetail>;
+
 // ---------------- endpoints ---------------------------------------------------
 
 export const api = {
@@ -224,6 +277,18 @@ export const api = {
     return request(`/v1/entities${qs ? `?${qs}` : ""}`, z.array(Entity));
   },
   entity: (id: string) => request(`/v1/entities/${id}`, EntityDetail),
+
+  insights: (status?: string) =>
+    request(`/v1/insights${status ? `?status=${status}` : ""}`, z.array(Insight)),
+  insight: (id: string) => request(`/v1/insights/${id}`, InsightDetail),
+  insightFeedback: (id: string, status: "useful" | "dismissed" | "surfaced") =>
+    request(`/v1/insights/${id}/feedback`, z.object({ ok: z.boolean() }), {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    }),
+
+  clusters: () => request("/v1/clusters", z.array(Cluster)),
+  cluster: (id: string) => request(`/v1/clusters/${id}`, ClusterDetail),
 };
 
 // ---------------- live events (SSE) ------------------------------------------
