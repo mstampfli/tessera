@@ -129,7 +129,8 @@ See `docs/THREAT_MODEL.md` for the STRIDE analysis.
 - M1 ingest and search: content-addressed ingestion, extractors, the job queue,
   embeddings, hybrid search, ask-with-citations, and the web UI. (done)
 - M2 entities and correlation: the security extractor pack, the entity graph,
-  and the correlation edges.
+  the correlation edges and neighborhood, URL ingestion with an SSRF guard, and
+  the sandboxed extractor plugin host. (done)
 - M3 clustering and insights: incremental clustering and cited insight cards.
 - M4 agents and deployment: the MCP server and the production deployment.
 
