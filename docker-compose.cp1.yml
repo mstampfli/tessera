@@ -1,0 +1,34 @@
+# cp1 overlay (CPU-only, tailnet-internal): run a self-hosted Ollama for both
+# embeddings and generation, so the stack needs no external model service. The
+# base file (docker-compose.prod.yml) already points the backend at OLLAMA_URL,
+# which the cp1 .env sets to http://ollama:11434.
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.cp1.yml up -d --build
+#
+# Pull the models once after first start:
+#   docker compose ... exec ollama ollama pull nomic-embed-text
+#   docker compose ... exec ollama ollama pull qwen2.5:3b
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
+
+volumes:
+  ollama_models:

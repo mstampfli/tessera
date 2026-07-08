@@ -57,7 +57,8 @@ services:
     environment:
       DATABASE_URL: postgres://tessera:${POSTGRES_PASSWORD}@db:5432/tessera
       TESSERA__SERVER__BIND: 0.0.0.0:8080
-      TESSERA__SERVER__SECURE_COOKIES: "true"
+      # true behind a TLS proxy; false for plain-HTTP localhost access.
+      TESSERA__SERVER__SECURE_COOKIES: ${COOKIE_SECURE:-true}
       TESSERA__CAS__PATH: /data/cas
       TESSERA__LOG__FORMAT: json
       # Reach a host Ollama by default; override for the fastembed CPU build.

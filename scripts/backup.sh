@@ -12,7 +12,7 @@ echo "backing up database -> $DEST/db.sql.gz"
 $COMPOSE exec -T db pg_dump --clean --if-exists -U tessera -d tessera | gzip >"$DEST/db.sql.gz"
 
 echo "backing up content store -> $DEST/cas.tar.gz"
-docker run --rm -v tessera_cas:/cas -v "$ABS_DEST":/backup alpine \
+docker run --rm -v ${COMPOSE_PROJECT_NAME:-tessera}_cas:/cas -v "$ABS_DEST":/backup alpine \
     tar czf /backup/cas.tar.gz -C /cas .
 
 echo "backup complete: $DEST"
