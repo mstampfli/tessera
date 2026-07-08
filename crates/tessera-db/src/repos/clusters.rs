@@ -250,6 +250,72 @@ pub async fn set_label(pool: &PgPool, id: Uuid, label: &str) -> Result<()> {
     Ok(())
 }
 
+/// A node in a cluster's entity co-occurrence graph: an entity mentioned in the
+/// cluster, weighted by how often it is mentioned there.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct GraphNode {
+    pub id: Uuid,
+    pub kind: String,
+    pub value: String,
+    pub display_value: String,
+    pub weight: i64,
+}
+
+/// An edge in a cluster's entity graph: a co-occurrence between two entities
+/// that are both in the cluster's node set.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct GraphEdge {
+    pub src_id: Uuid,
+    pub dst_id: Uuid,
+    pub rel: String,
+    pub source_count: i32,
+}
+
+/// The entity co-occurrence subgraph for a cluster: the entities mentioned in
+/// its chunks (capped at `node_cap`, most-mentioned first) and the co-occurrence
+/// edges among exactly that node set. This is the actionable "campaign network"
+/// view. Edges are restricted to the returned nodes so the graph is always
+/// internally consistent (no dangling endpoints).
+pub async fn graph(
+    pool: &PgPool,
+    cluster_id: Uuid,
+    node_cap: i64,
+) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)> {
+    let nodes = sqlx::query_as::<_, GraphNode>(
+        "SELECT e.id, e.kind, e.value, e.display_value, count(*)::bigint AS weight
+         FROM cluster_members m
+         JOIN entity_mentions em ON em.chunk_id = m.chunk_id
+         JOIN entities e ON e.id = em.entity_id
+         WHERE m.cluster_id = $1
+         GROUP BY e.id, e.kind, e.value, e.display_value
+         ORDER BY weight DESC, e.id
+         LIMIT $2",
+    )
+    .bind(cluster_id)
+    .bind(node_cap)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+
+    if nodes.is_empty() {
+        return Ok((nodes, Vec::new()));
+    }
+
+    let ids: Vec<Uuid> = nodes.iter().map(|n| n.id).collect();
+    let edges = sqlx::query_as::<_, GraphEdge>(
+        "SELECT edge.src_id, edge.dst_id, edge.rel, edge.source_count
+         FROM entity_edges edge
+         WHERE edge.src_id = ANY($1) AND edge.dst_id = ANY($1)
+         ORDER BY edge.source_count DESC, edge.src_id, edge.dst_id",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+
+    Ok((nodes, edges))
+}
+
 /// The top entities mentioned across a cluster's chunks (for synthesis context
 /// and labeling), by mention frequency within the cluster.
 pub async fn top_entities(

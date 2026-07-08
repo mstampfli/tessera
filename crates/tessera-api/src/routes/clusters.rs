@@ -16,6 +16,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/clusters", get(list))
         .route("/clusters/{id}", get(detail))
+        .route("/clusters/{id}/graph", get(graph))
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +90,62 @@ async fn detail(
                 title: m.title,
                 excerpt: m.text.chars().take(200).collect(),
                 similarity: m.similarity,
+            })
+            .collect(),
+    }))
+}
+
+#[derive(Debug, Serialize)]
+struct GraphNodeView {
+    id: Uuid,
+    kind: String,
+    value: String,
+    display_value: String,
+    weight: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphEdgeView {
+    src_id: Uuid,
+    dst_id: Uuid,
+    rel: String,
+    source_count: i32,
+}
+
+#[derive(Debug, Serialize)]
+struct ClusterGraph {
+    nodes: Vec<GraphNodeView>,
+    edges: Vec<GraphEdgeView>,
+}
+
+/// The cluster's entity co-occurrence network (nodes capped for renderability).
+async fn graph(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ClusterGraph>, ApiError> {
+    ctx.require(Scope::Read)?;
+    // Cap nodes so the client graph stays renderable (plan: cluster graph only
+    // under ~500 nodes).
+    let (nodes, edges) = clusters::graph(&state.db.api, id, 300).await?;
+    Ok(Json(ClusterGraph {
+        nodes: nodes
+            .into_iter()
+            .map(|n| GraphNodeView {
+                id: n.id,
+                kind: n.kind,
+                value: n.value,
+                display_value: n.display_value,
+                weight: n.weight,
+            })
+            .collect(),
+        edges: edges
+            .into_iter()
+            .map(|e| GraphEdgeView {
+                src_id: e.src_id,
+                dst_id: e.dst_id,
+                rel: e.rel,
+                source_count: e.source_count,
             })
             .collect(),
     }))

@@ -1,13 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
+import { use, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { CorrelationGraph } from "@/components/CorrelationGraph";
 
 export default function ClusterDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const detail = useQuery({ queryKey: ["cluster", id], queryFn: () => api.cluster(id) });
+  const [showGraph, setShowGraph] = useState(false);
+  // The network is heavy (WebGL), so fetch it only when the user opens it.
+  const graph = useQuery({
+    queryKey: ["cluster-graph", id],
+    queryFn: () => api.clusterGraph(id),
+    enabled: showGraph,
+  });
   const c = detail.data?.cluster;
 
   return (
@@ -21,6 +29,41 @@ export default function ClusterDetailPage({ params }: { params: Promise<{ id: st
           </p>
         )}
       </div>
+
+      <section>
+        <div className="flex items-center justify-between">
+          <span className="mk-kicker">correlation network</span>
+          <button className="mk-btn text-xs" onClick={() => setShowGraph((s) => !s)}>
+            {showGraph ? "hide" : "show"}
+          </button>
+        </div>
+        {showGraph && graph.isLoading && (
+          <p className="mt-2 text-sm" style={{ color: "var(--mk-text-3)" }}>
+            building network ...
+          </p>
+        )}
+        {showGraph && graph.data && (
+          <CorrelationGraph
+            ariaLabel={`Entity correlation network for this cluster: ${graph.data.nodes.length} entities`}
+            nodes={graph.data.nodes.map((n) => ({
+              id: n.id,
+              label: n.value,
+              kind: n.kind,
+              weight: n.weight,
+            }))}
+            edges={graph.data.edges.map((e) => ({
+              source: e.src_id,
+              target: e.dst_id,
+              weight: e.source_count,
+            }))}
+          />
+        )}
+        {showGraph && graph.data && graph.data.nodes.length === 0 && (
+          <p className="mt-2 text-sm" style={{ color: "var(--mk-text-3)" }}>
+            no entities extracted in this cluster yet.
+          </p>
+        )}
+      </section>
 
       <section>
         <span className="mk-kicker">members</span>

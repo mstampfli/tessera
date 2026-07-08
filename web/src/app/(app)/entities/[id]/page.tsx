@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
+import { use, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { CorrelationGraph } from "@/components/CorrelationGraph";
 
 export default function EntityDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const detail = useQuery({ queryKey: ["entity", id], queryFn: () => api.entity(id) });
+  const [view, setView] = useState<"table" | "graph">("table");
 
   const e = detail.data?.entity;
 
@@ -26,15 +28,58 @@ export default function EntityDetailPage({ params }: { params: Promise<{ id: str
         )}
       </div>
 
-      {/* Correlations lead with a table, not a graph: denser and more honest. */}
+      {/* Correlations lead with a table, not a graph: denser and more honest.
+          The graph is an opt-in view of the same neighborhood. */}
       <section>
-        <span className="mk-kicker">top correlations</span>
+        <div className="flex items-center justify-between">
+          <span className="mk-kicker">top correlations</span>
+          {detail.data && detail.data.neighborhood.length > 0 && (
+            <div className="flex gap-1" role="tablist" aria-label="correlation view">
+              {(["table", "graph"] as const).map((v) => (
+                <button
+                  key={v}
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => setView(v)}
+                  className="mk-btn text-xs"
+                  style={
+                    view === v
+                      ? { borderColor: "var(--mk-accent)", color: "var(--mk-accent)" }
+                      : undefined
+                  }
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {detail.data && detail.data.neighborhood.length === 0 && (
           <p className="mt-2 text-sm" style={{ color: "var(--mk-text-3)" }}>
             no correlations yet.
           </p>
         )}
-        {detail.data && detail.data.neighborhood.length > 0 && (
+        {detail.data && detail.data.neighborhood.length > 0 && view === "graph" && e && (
+          <CorrelationGraph
+            centerId={e.id}
+            ariaLabel={`Correlation graph for ${e.value}: ${detail.data.neighborhood.length} related entities`}
+            nodes={[
+              { id: e.id, label: e.value, kind: e.kind, weight: e.mention_count },
+              ...detail.data.neighborhood.map((n) => ({
+                id: n.id,
+                label: n.value,
+                kind: n.kind,
+                weight: n.source_count,
+              })),
+            ]}
+            edges={detail.data.neighborhood.map((n) => ({
+              source: e.id,
+              target: n.id,
+              weight: n.score,
+            }))}
+          />
+        )}
+        {detail.data && detail.data.neighborhood.length > 0 && view === "table" && (
           <table className="mt-2 w-full text-sm">
             <thead>
               <tr className="text-left font-mono text-xs" style={{ color: "var(--mk-text-3)" }}>

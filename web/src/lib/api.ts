@@ -222,6 +222,27 @@ export const ClusterDetail = z.object({
 });
 export type ClusterDetail = z.infer<typeof ClusterDetail>;
 
+export const ClusterGraph = z.object({
+  nodes: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.string(),
+      value: z.string(),
+      display_value: z.string(),
+      weight: z.number(),
+    }),
+  ),
+  edges: z.array(
+    z.object({
+      src_id: z.string(),
+      dst_id: z.string(),
+      rel: z.string(),
+      source_count: z.number(),
+    }),
+  ),
+});
+export type ClusterGraph = z.infer<typeof ClusterGraph>;
+
 // ---------------- endpoints ---------------------------------------------------
 
 export const api = {
@@ -289,6 +310,7 @@ export const api = {
 
   clusters: () => request("/v1/clusters", z.array(Cluster)),
   cluster: (id: string) => request(`/v1/clusters/${id}`, ClusterDetail),
+  clusterGraph: (id: string) => request(`/v1/clusters/${id}/graph`, ClusterGraph),
 };
 
 // ---------------- live events (SSE) ------------------------------------------
