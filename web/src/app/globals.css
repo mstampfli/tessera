@@ -1,0 +1,243 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Maka design tokens - roasted brown, burnt orange, IBM Plex.
+   Dark is default (:root); [data-theme="light"] is the paper variant.
+   Replicated from the house design system (styles.css / tokens.css).
+   ============================================================ */
+:root {
+  color-scheme: dark;
+
+  --mk-brown-0: #1a120b;
+  --mk-brown-1: #221810;
+  --mk-brown-2: #2b1e13;
+  --mk-brown-3: #140d07;
+  --mk-clay-1: #3c2a19;
+  --mk-clay-2: #5a4023;
+  --mk-cream-1: #f4ead9;
+  --mk-cream-2: #c7b299;
+  --mk-cream-3: #8d7456;
+  --mk-orange-1: #e0731d;
+  --mk-orange-2: #f08a33;
+  --mk-amber-1: #eda43d;
+  --mk-red-1: #d9503c;
+  --mk-red-2: #e8654f;
+  --mk-green-1: #8fa05a;
+
+  --mk-surface-page: var(--mk-brown-0);
+  --mk-surface-1: var(--mk-brown-1);
+  --mk-surface-2: var(--mk-brown-2);
+  --mk-surface-inset: var(--mk-brown-3);
+
+  --mk-border: var(--mk-clay-1);
+  --mk-border-strong: var(--mk-clay-2);
+
+  --mk-text-1: var(--mk-cream-1);
+  --mk-text-2: var(--mk-cream-2);
+  --mk-text-3: var(--mk-cream-3);
+
+  --mk-accent: var(--mk-orange-1);
+  --mk-accent-hover: var(--mk-orange-2);
+  --mk-on-accent: #1a120b;
+  --mk-highlight: var(--mk-amber-1);
+  --mk-danger: var(--mk-red-1);
+  --mk-danger-hover: var(--mk-red-2);
+  --mk-success: var(--mk-green-1);
+  --mk-warn: var(--mk-amber-1);
+  --mk-focus: var(--mk-orange-1);
+
+  --mk-scanline: rgba(255, 214, 165, 0.03);
+  --mk-shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --mk-brown-0: #f1e8d8;
+  --mk-brown-1: #f8f1e3;
+  --mk-brown-2: #ece0ca;
+  --mk-brown-3: #fbf6ec;
+  --mk-clay-1: #d3c0a4;
+  --mk-clay-2: #ab9170;
+  --mk-cream-1: #2e1f10;
+  --mk-cream-2: #6e5942;
+  --mk-cream-3: #99836a;
+  --mk-orange-1: #c75f0d;
+  --mk-orange-2: #e0731d;
+  --mk-amber-1: #9c6b10;
+  --mk-red-1: #b83a28;
+  --mk-red-2: #d9503c;
+  --mk-green-1: #5f7034;
+  --mk-scanline: rgba(80, 50, 20, 0.035);
+  --mk-shadow-pop: 0 8px 24px rgba(80, 50, 20, 0.18);
+}
+
+/* Map Tailwind semantic utilities onto Maka tokens. */
+@theme inline {
+  --color-background: var(--mk-surface-page);
+  --color-surface: var(--mk-surface-1);
+  --color-surface-2: var(--mk-surface-2);
+  --color-inset: var(--mk-surface-inset);
+  --color-foreground: var(--mk-text-1);
+  --color-muted: var(--mk-text-2);
+  --color-faint: var(--mk-text-3);
+  --color-border: var(--mk-border);
+  --color-border-strong: var(--mk-border-strong);
+  --color-accent: var(--mk-accent);
+  --color-accent-hover: var(--mk-accent-hover);
+  --color-on-accent: var(--mk-on-accent);
+  --color-highlight: var(--mk-highlight);
+  --color-danger: var(--mk-danger);
+  --color-success: var(--mk-success);
+  --color-warning: var(--mk-warn);
+  --color-ring: var(--mk-focus);
+
+  --radius-sm: 2px;
+  --radius: 4px;
+  --radius-lg: 6px;
+
+  --font-sans: var(--font-ibm-sans), system-ui, sans-serif;
+  --font-mono: var(--font-ibm-mono), ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* ---------------- base + signature ---------------- */
+html {
+  scrollbar-gutter: stable;
+}
+
+body {
+  background: var(--mk-surface-page);
+  color: var(--mk-text-1);
+  font: 400 15px/1.6 var(--font-ibm-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: clip;
+}
+
+/* faint scanlines - the Maka texture */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, var(--mk-scanline) 0 1px, transparent 1px 3px);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-ibm-mono), ui-monospace, monospace;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: var(--mk-accent);
+  color: var(--mk-on-accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--mk-focus);
+  outline-offset: 2px;
+}
+
+/* ---------------- component classes ---------------- */
+
+/* Mono kicker with the "// " prefix. */
+.mk-kicker {
+  font-family: var(--font-ibm-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--mk-text-3);
+}
+.mk-kicker::before {
+  content: "// ";
+}
+
+/* Bracketed mono status tag: [ warn ] */
+.mk-tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-ibm-mono), ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border: 1px solid var(--mk-border);
+  border-radius: 2px;
+  color: var(--mk-text-2);
+  white-space: nowrap;
+}
+.mk-tag::before { content: "[ "; color: var(--mk-text-3); }
+.mk-tag::after { content: " ]"; color: var(--mk-text-3); }
+.mk-tag--accent { border-color: var(--mk-accent); color: var(--mk-accent); }
+.mk-tag--danger { border-color: var(--mk-danger); color: var(--mk-danger); }
+.mk-tag--warn { border-color: var(--mk-warn); color: var(--mk-warn); }
+.mk-tag--success { border-color: var(--mk-success); color: var(--mk-success); }
+
+/* The signature 2px frame that turns orange on hover/focus. */
+.mk-frame {
+  border: 2px solid var(--mk-border);
+  border-radius: 6px;
+  background: var(--mk-surface-1);
+  transition: border-color 140ms ease-out;
+}
+.mk-frame:hover { border-color: var(--mk-border-strong); }
+
+.mk-card {
+  border: 1px solid var(--mk-border);
+  border-radius: 6px;
+  background: var(--mk-surface-1);
+}
+
+/* Buttons */
+.mk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ibm-mono), ui-monospace, monospace;
+  font-size: 13px;
+  padding: 7px 12px;
+  border: 2px solid var(--mk-border);
+  border-radius: 4px;
+  background: var(--mk-surface-1);
+  color: var(--mk-text-1);
+  cursor: pointer;
+  transition: border-color 140ms ease-out, color 140ms ease-out, background 140ms ease-out;
+}
+.mk-btn:hover:not(:disabled) { border-color: var(--mk-accent); color: var(--mk-accent); }
+.mk-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.mk-btn--primary {
+  background: var(--mk-accent);
+  border-color: var(--mk-accent);
+  color: var(--mk-on-accent);
+}
+.mk-btn--primary:hover:not(:disabled) {
+  background: var(--mk-accent-hover);
+  border-color: var(--mk-accent-hover);
+  color: var(--mk-on-accent);
+}
+
+/* Inputs */
+.mk-input {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  background: var(--mk-surface-inset);
+  color: var(--mk-text-1);
+  border: 2px solid var(--mk-border);
+  border-radius: 4px;
+  transition: border-color 140ms ease-out;
+}
+.mk-input:focus { outline: none; border-color: var(--mk-accent); }
+.mk-input::placeholder { color: var(--mk-text-3); }
+
+/* A highlighted chunk (citation target). */
+.mk-highlight-chunk {
+  background: color-mix(in srgb, var(--mk-highlight) 22%, transparent);
+  border-left: 3px solid var(--mk-highlight);
+}

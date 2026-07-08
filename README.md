@@ -78,8 +78,37 @@ curl -s -H "Authorization: Bearer <token from step 3>" \
   http://127.0.0.1:8080/v1/auth/me
 ```
 
-`tesserad doctor` prints the resolved configuration and checks that Postgres and
-the content store are reachable.
+`tesserad doctor` prints the resolved configuration and checks that Postgres,
+the content store, and the model providers are reachable.
+
+Ingestion, search, and ask over the API:
+
+```sh
+# Ingest a document (programs use a bearer token; the web UI uses a session).
+curl -s -H "Authorization: Bearer <token>" -H 'Content-Type: application/json' \
+  -d '{"content":"...","media_type":"text/markdown","title":"report"}' \
+  http://127.0.0.1:8080/v1/ingest
+
+# Search (hybrid vector + keyword) and ask with citations.
+curl -s -H "Authorization: Bearer <token>" \
+  'http://127.0.0.1:8080/v1/search?q=your+query&mode=hybrid'
+curl -s -H "Authorization: Bearer <token>" -H 'Content-Type: application/json' \
+  -d '{"question":"..."}' http://127.0.0.1:8080/v1/ask
+```
+
+### Web UI
+
+The `web/` directory is a Next.js app that talks to the core over a same-origin
+`/api` proxy. With the core running (step 4):
+
+```sh
+cd web
+npm install
+npm run dev   # http://localhost:3000, proxies /api to the core on :8080
+```
+
+Sign in with the user from step 3, then ingest by dropping files or pasting data,
+watch the pipeline progress live, and search or ask over what you have ingested.
 
 ## Security posture
 
@@ -98,7 +127,7 @@ See `docs/THREAT_MODEL.md` for the STRIDE analysis.
 
 - M0 foundation: workspace, schema, config, auth, CLI. (done)
 - M1 ingest and search: content-addressed ingestion, extractors, the job queue,
-  embeddings, hybrid search, ask-with-citations, and the web UI shell.
+  embeddings, hybrid search, ask-with-citations, and the web UI. (done)
 - M2 entities and correlation: the security extractor pack, the entity graph,
   and the correlation edges.
 - M3 clustering and insights: incremental clustering and cited insight cards.
