@@ -237,10 +237,14 @@ mod tests {
     #[test]
     fn tampered_token_secret_does_not_verify() {
         let t = generate_api_token();
-        // Flip the last character of the secret; must not match the stored hash.
+        // Flip the FIRST character of the secret. It encodes the top bits of the
+        // first secret byte, so the change always alters the decoded secret (the
+        // LAST base64 char's low bits are padding and can decode identically).
         let mut bad = t.plaintext.clone();
-        let last = bad.pop().unwrap();
-        bad.push(if last == 'A' { 'B' } else { 'A' });
+        let secret_start = bad.rfind('_').expect("token has a secret segment") + 1;
+        let orig = bad.as_bytes()[secret_start] as char;
+        let repl = if orig == 'A' { 'B' } else { 'A' };
+        bad.replace_range(secret_start..secret_start + 1, &repl.to_string());
         let presented = parse_api_token(&bad).expect("still well-formed");
         assert!(!hashes_equal(&presented.presented_hash, &t.hash));
     }
