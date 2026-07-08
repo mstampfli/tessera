@@ -170,7 +170,7 @@ See `docs/THREAT_MODEL.md` for the STRIDE analysis.
   the sandboxed extractor plugin host. (done)
 - M3 clustering and insights: incremental clustering, cited insight cards, and
   the live triage feed. (done)
-- M4 agents and deployment: the MCP server and the production deployment.
+- M4 agents and deployment: the MCP server and the production stack. (done)
 
 ## License
 
