@@ -87,6 +87,7 @@ async fn worker_loop(ctx: PipelineContext, worker_id: String, shutdown: Cancella
 async fn run_job(ctx: &PipelineContext, worker_id: &str, job: Job) {
     let job_id = job.id;
     let kind = job.kind.clone();
+    let started = std::time::Instant::now();
     let heartbeat_secs = u64::try_from((LEASE_SECS / 3).max(1)).unwrap_or(20);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(heartbeat_secs));
     heartbeat.tick().await; // consume the immediate first tick
@@ -97,6 +98,9 @@ async fn run_job(ctx: &PipelineContext, worker_id: &str, job: Job) {
     loop {
         tokio::select! {
             result = &mut work => {
+                let outcome = if result.is_ok() { "done" } else { "failed" };
+                metrics::counter!("tessera_jobs_processed_total", "kind" => kind.clone(), "outcome" => outcome).increment(1);
+                metrics::histogram!("tessera_job_duration_seconds", "kind" => kind.clone()).record(started.elapsed().as_secs_f64());
                 match result {
                     Ok(()) => {
                         if let Err(e) = queue::complete(&ctx.db.worker, job_id).await {

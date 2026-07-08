@@ -25,6 +25,16 @@ pub struct Config {
     pub providers: ProvidersConfig,
     #[serde(default)]
     pub pipeline: PipelineConfig,
+    #[serde(default)]
+    pub plugins: PluginsConfig,
+}
+
+/// Extractor plugin configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PluginsConfig {
+    /// Directory of plugin manifest TOML files. When unset, no plugins run.
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
 }
 
 /// Configuration for the pluggable AI provider layer. These are plain strings
@@ -273,6 +283,7 @@ impl Default for Config {
             },
             providers: ProvidersConfig::default(),
             pipeline: PipelineConfig::default(),
+            plugins: PluginsConfig::default(),
         }
     }
 }

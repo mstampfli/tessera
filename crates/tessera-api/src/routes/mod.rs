@@ -10,6 +10,7 @@ pub mod health;
 pub mod ingest;
 pub mod insights;
 pub mod jobs;
+pub mod mcp;
 pub mod search;
 pub mod sources;
 pub mod tokens;
@@ -32,5 +33,6 @@ pub fn v1_router() -> Router<AppState> {
         .merge(clusters::router())
         .merge(sources::router())
         .merge(jobs::router())
+        .merge(mcp::router())
         .merge(events::router())
 }

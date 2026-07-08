@@ -25,6 +25,58 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::ExtractError;
 
+/// A set of plugins loaded from a directory of manifest files, matched to
+/// content by media type or sniff label.
+#[derive(Debug, Clone, Default)]
+pub struct PluginRegistry {
+    manifests: Vec<PluginManifest>,
+}
+
+impl PluginRegistry {
+    /// Load every `*.toml` manifest in a directory. A missing directory yields an
+    /// empty registry (plugins are optional). Malformed manifests are skipped
+    /// with a warning.
+    #[must_use]
+    pub fn load_from_dir(dir: Option<&std::path::Path>) -> Self {
+        let Some(dir) = dir else {
+            return Self::default();
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Self::default();
+        };
+        let mut manifests = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            if let Some(m) = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| toml::from_str::<PluginManifest>(&s).ok())
+            {
+                manifests.push(m);
+            } else {
+                tracing::warn!(path = %path.display(), "skipping malformed plugin manifest");
+            }
+        }
+        tracing::info!(count = manifests.len(), "loaded extractor plugins");
+        Self { manifests }
+    }
+
+    /// Find a plugin that handles this media type or sniff label, if any.
+    #[must_use]
+    pub fn find(&self, media_type: &str, label: &str) -> Option<&PluginManifest> {
+        self.manifests
+            .iter()
+            .find(|m| m.media_types.iter().any(|t| t == media_type || t == label))
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.manifests.is_empty()
+    }
+}
+
 /// Declares how to run one plugin.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginManifest {

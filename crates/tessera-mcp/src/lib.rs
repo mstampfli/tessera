@@ -82,6 +82,41 @@ impl McpState {
             source_id: source.id,
         })
     }
+
+    /// Build the state from already-initialized pieces (used by the HTTP MCP
+    /// transport, which shares the running server's providers and DB).
+    #[must_use]
+    pub fn from_parts(
+        db: Db,
+        cas: CasStore,
+        embedder: Arc<dyn EmbeddingProvider>,
+        llm: Arc<dyn LlmProvider>,
+        space: EmbeddingSpace,
+        source_id: Uuid,
+    ) -> Self {
+        Self {
+            db,
+            cas,
+            embedder,
+            llm,
+            space,
+            source_id,
+        }
+    }
+}
+
+/// Handle one JSON-RPC request, returning the response, or `None` for a
+/// notification (no id, no reply). Used by the HTTP transport.
+pub async fn dispatch_request(
+    state: &McpState,
+    request: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let method = request
+        .get("method")
+        .and_then(|m| m.as_str())
+        .unwrap_or_default();
+    let id = request.get("id").cloned()?;
+    Some(handle(state, method, request.get("params"), id).await)
 }
 
 /// Run the stdio JSON-RPC loop until stdin closes.

@@ -168,11 +168,17 @@ pub async fn serve(config: Config) -> Result<()> {
     let workers = config.pipeline.workers;
     let db_url = config.database.url.clone();
 
+    // Load extractor plugins (if any) before `config` is moved into the state.
+    let plugins = std::sync::Arc::new(tessera_extract::plugin::PluginRegistry::load_from_dir(
+        config.plugins.dir.as_deref(),
+    ));
+
     // Pipeline context values (read before `config` is moved into the state).
     let pipeline_ctx = tessera_pipeline::PipelineContext {
         db: db.clone(),
         cas: cas.clone(),
         embedder: embedder.clone(),
+        plugins,
         llm: llm.clone(),
         space_id: space.id,
         embed_batch: config.pipeline.embed_batch,
@@ -181,6 +187,21 @@ pub async fn serve(config: Config) -> Result<()> {
         synth_debounce_secs: config.pipeline.synth_debounce_secs,
     };
 
+    // Install the Prometheus recorder (global) and keep its render handle.
+    let metrics = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .install_recorder()
+        .map_err(|e| anyhow!("install metrics recorder: {e}"))?;
+
+    // A source for documents ingested by agents over the HTTP MCP transport.
+    let mcp_source = tessera_db::repos::sources::create(
+        &db.api,
+        "agent",
+        "mcp-http",
+        &serde_json::json!({ "transport": "http" }),
+    )
+    .await
+    .map_err(|e| anyhow!(e.to_string()))?;
+
     let state = AppState::new(AppStateParts {
         db: db.clone(),
         config: Arc::new(config),
@@ -188,6 +209,8 @@ pub async fn serve(config: Config) -> Result<()> {
         embedder: embedder.clone(),
         llm,
         space: space.clone(),
+        metrics,
+        mcp_source_id: mcp_source.id,
     });
 
     // Forward Postgres NOTIFY progress into the SSE event bus.

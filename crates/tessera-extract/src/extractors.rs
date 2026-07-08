@@ -47,6 +47,31 @@ pub fn normalize(bytes: &[u8], sniff: &SniffedType) -> Result<Prepared, ExtractE
     }
 }
 
+/// Convert a plugin's extraction events into the same `Prepared` shape the
+/// built-in extractors produce, so plugin output flows through the identical
+/// downstream pipeline.
+#[must_use]
+pub fn events_to_prepared(events: Vec<tessera_core::ExtractEvent>) -> Prepared {
+    use tessera_core::ExtractEvent;
+    let mut title = None;
+    let mut chunks = Vec::new();
+    for ev in events {
+        match ev {
+            ExtractEvent::Meta { title: t, .. } => {
+                if title.is_none() {
+                    title = t;
+                }
+            }
+            ExtractEvent::Text { text, .. } => chunks.extend(chunk_prose(&text)),
+            ExtractEvent::Record { data } => {
+                chunks.extend(record_text_chunks(&value_to_text(&data)));
+            }
+            ExtractEvent::Entity { .. } | ExtractEvent::Warn { .. } => {}
+        }
+    }
+    Prepared { title, chunks }
+}
+
 fn normalize_text(text: &str) -> Prepared {
     Prepared {
         title: None,

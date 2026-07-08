@@ -65,6 +65,8 @@ clap = { version = "4", features = ["derive", "env"] }
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false }
 
 # HTTP client (providers, doctor)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }

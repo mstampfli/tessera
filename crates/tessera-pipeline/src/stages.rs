@@ -58,9 +58,20 @@ async fn process_document(ctx: &PipelineContext, payload: &Value) -> Result<()> 
     let hash = ContentHash::from_slice(&doc.content_hash)?;
     let bytes = ctx.cas.read_verified(&hash).await?;
 
-    // Sniff (using the stored media type as a hint) and normalize.
+    // Sniff (using the stored media type as a hint), then normalize. A configured
+    // plugin that handles this media type takes precedence over the built-ins.
     let sniffed = tessera_extract::sniff(&bytes, Some(&doc.media_type));
-    let prepared = match tessera_extract::normalize(&bytes, &sniffed) {
+    let prepared_result =
+        if let Some(manifest) = ctx.plugins.find(&sniffed.media_type, &sniffed.label) {
+            tessera_extract::plugin::run_plugin(manifest, &bytes)
+                .await
+                .map(tessera_extract::extractors::events_to_prepared)
+                .map_err(|e| Error::new(ErrorKind::Extract, e.to_string()))
+        } else {
+            tessera_extract::normalize(&bytes, &sniffed)
+                .map_err(|e| Error::new(ErrorKind::Extract, e.to_string()))
+        };
+    let prepared = match prepared_result {
         Ok(p) => p,
         Err(e) => {
             // Unsupported or malformed content is a document-level failure, not a

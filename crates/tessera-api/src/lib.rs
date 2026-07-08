@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod error;
 pub mod events;
+pub mod metrics;
 pub mod rate_limit;
 pub mod routes;
 pub mod url_guard;
@@ -41,6 +42,10 @@ pub struct AppState {
     pub events: EventBus,
     /// Login attempt rate limiter (per client IP).
     pub login_limiter: Arc<RateLimiter>,
+    /// Prometheus metrics handle (rendered by the `/metrics` endpoint).
+    pub metrics: metrics_exporter_prometheus::PrometheusHandle,
+    /// The source that HTTP-MCP agent ingests attach to.
+    pub mcp_source_id: uuid::Uuid,
 }
 
 /// Inputs needed to build the application state.
@@ -51,6 +56,8 @@ pub struct AppStateParts {
     pub embedder: Arc<dyn EmbeddingProvider>,
     pub llm: Arc<dyn LlmProvider>,
     pub space: EmbeddingSpace,
+    pub metrics: metrics_exporter_prometheus::PrometheusHandle,
+    pub mcp_source_id: uuid::Uuid,
 }
 
 impl AppState {
@@ -66,6 +73,8 @@ impl AppState {
             space: parts.space,
             events: EventBus::new(tx),
             login_limiter: Arc::new(RateLimiter::new(10, std::time::Duration::from_mins(1))),
+            metrics: parts.metrics,
+            mcp_source_id: parts.mcp_source_id,
         }
     }
 }
@@ -79,7 +88,9 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .merge(routes::health::router())
+        .merge(metrics::router())
         .nest("/v1", routes::v1_router())
+        .layer(axum::middleware::from_fn(metrics::track_http))
         .layer(axum::extract::DefaultBodyLimit::max(GLOBAL_BODY_LIMIT))
         .layer(RequestBodyLimitLayer::new(GLOBAL_BODY_LIMIT))
         .layer(TraceLayer::new_for_http())
