@@ -7,6 +7,7 @@
 
 pub mod chunk;
 pub mod extractors;
+pub mod security;
 pub mod sniff;
 
 pub use chunk::PreparedChunk;

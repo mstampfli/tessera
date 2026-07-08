@@ -18,6 +18,9 @@ pulldown-cmark = "0.13.4"
 csv = "1.4.0"
 infer = "0.19.0"
 scraper = "0.27.0"
+regex = "1.12.4"
+url = "2.5.8"
+psl = "2.1.217"
 
 [lints]
 workspace = true

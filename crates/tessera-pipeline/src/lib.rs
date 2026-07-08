@@ -13,7 +13,10 @@ pub use context::PipelineContext;
 pub use worker::{run_pipeline, PipelineHandle};
 
 /// Job kind: normalize + chunk a freshly ingested document, then fan out
-/// embedding jobs for its chunks.
+/// embedding and entity-extraction jobs for its chunks.
 pub const KIND_PROCESS_DOCUMENT: &str = "process_document";
 /// Job kind: embed a batch of chunk ids into the active space.
 pub const KIND_EMBED_CHUNKS: &str = "embed_chunks";
+/// Job kind: extract security entities from a document's chunks and recompute
+/// its correlation edges.
+pub const KIND_EXTRACT_ENTITIES: &str = "extract_entities";

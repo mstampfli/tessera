@@ -2,22 +2,25 @@
 //! the same state (chunks are unique on `(document_id, seq)`, embeddings on
 //! `(chunk_id, space_id)`, and both insert with `ON CONFLICT DO NOTHING`).
 
+use std::collections::{HashMap, HashSet};
+
 use serde_json::{json, Value};
 use tessera_core::error::{Error, ErrorKind, Result};
 use tessera_core::ContentHash;
 use tessera_db::queue::{self, EnqueueOpts};
-use tessera_db::repos::{chunks, documents};
+use tessera_db::repos::{chunks, documents, entities};
 use tessera_providers::EmbedKind;
 use uuid::Uuid;
 
 use crate::context::PipelineContext;
-use crate::{KIND_EMBED_CHUNKS, KIND_PROCESS_DOCUMENT};
+use crate::{KIND_EMBED_CHUNKS, KIND_EXTRACT_ENTITIES, KIND_PROCESS_DOCUMENT};
 
 /// Dispatch a claimed job to its handler.
 pub async fn dispatch(ctx: &PipelineContext, kind: &str, payload: &Value) -> Result<()> {
     match kind {
         KIND_PROCESS_DOCUMENT => process_document(ctx, payload).await,
         KIND_EMBED_CHUNKS => embed_chunks(ctx, payload).await,
+        KIND_EXTRACT_ENTITIES => extract_entities(ctx, payload).await,
         other => Err(Error::new(
             ErrorKind::Invalid,
             format!("unknown job kind: {other}"),
@@ -92,6 +95,20 @@ async fn process_document(ctx: &PipelineContext, payload: &Value) -> Result<()> 
         return Ok(());
     }
 
+    // Entity extraction is independent of embedding (it only needs the chunks),
+    // so enqueue it now regardless of embedding state. The dedupe key drops
+    // duplicate enqueues while one is queued/running.
+    queue::enqueue(
+        pool,
+        KIND_EXTRACT_ENTITIES,
+        &json!({ "document_id": document_id }),
+        &EnqueueOpts {
+            dedupe_key: Some(format!("extract:{document_id}")),
+            ..Default::default()
+        },
+    )
+    .await?;
+
     // Which chunks still need embedding in the active space?
     let pending = chunks::ids_without_embedding(pool, document_id, ctx.space_id).await?;
 
@@ -129,6 +146,66 @@ async fn process_document(ctx: &PipelineContext, payload: &Value) -> Result<()> 
     let _ = queue::notify(
         pool,
         &json!({ "type": "document.processing", "document_id": document_id, "chunks": inputs.len() }),
+    )
+    .await;
+    Ok(())
+}
+
+/// Extract security entities from a document's chunks, record mentions, and
+/// recompute its correlation edges. Fully idempotent: entity upserts dedup on
+/// `(kind, value)`, mentions on `(entity_id, chunk_id, span)`, and co-occurrence
+/// is recomputed (not incremented).
+async fn extract_entities(ctx: &PipelineContext, payload: &Value) -> Result<()> {
+    let document_id = payload_uuid(payload, "document_id")?;
+    let pool = &ctx.db.worker;
+
+    let doc_chunks = chunks::list_by_document(pool, document_id).await?;
+    if doc_chunks.is_empty() {
+        return Ok(());
+    }
+
+    // Cache entity ids by (kind, value) so a value seen across many chunks is
+    // upserted once.
+    let mut cache: HashMap<(&'static str, String), Uuid> = HashMap::new();
+    let mut affected: HashSet<Uuid> = HashSet::new();
+
+    for chunk in &doc_chunks {
+        for m in tessera_extract::security::extract(&chunk.text) {
+            let key = (m.kind, m.value.clone());
+            let entity_id = if let Some(id) = cache.get(&key) {
+                *id
+            } else {
+                let id = entities::upsert(pool, m.kind, &m.value, &m.raw).await?;
+                cache.insert(key, id);
+                id
+            };
+            affected.insert(entity_id);
+
+            let span = Some((
+                i32::try_from(m.start).unwrap_or(0),
+                i32::try_from(m.end).unwrap_or(0),
+            ));
+            entities::insert_mention(
+                pool,
+                entity_id,
+                chunk.id,
+                document_id,
+                &m.raw,
+                span,
+                "security",
+                1.0,
+            )
+            .await?;
+        }
+    }
+
+    let ids: Vec<Uuid> = affected.into_iter().collect();
+    entities::recompute_mention_counts(pool, &ids).await?;
+    entities::recompute_cooccurrence(pool, document_id).await?;
+
+    let _ = queue::notify(
+        pool,
+        &json!({ "type": "entities.extracted", "document_id": document_id, "entities": ids.len() }),
     )
     .await;
     Ok(())
