@@ -8,12 +8,18 @@ use serde_json::{json, Value};
 use tessera_core::error::{Error, ErrorKind, Result};
 use tessera_core::ContentHash;
 use tessera_db::queue::{self, EnqueueOpts};
-use tessera_db::repos::{chunks, documents, entities};
+use tessera_db::repos::clusters::MemberChunk;
+use tessera_db::repos::insights::{EvidenceInput, InsightInput};
+use tessera_db::repos::{chunks, clusters, documents, embeddings, entities, insights};
 use tessera_providers::EmbedKind;
 use uuid::Uuid;
 
 use crate::context::PipelineContext;
-use crate::{KIND_EMBED_CHUNKS, KIND_EXTRACT_ENTITIES, KIND_PROCESS_DOCUMENT};
+use crate::synth;
+use crate::{
+    KIND_ASSIGN_CLUSTERS, KIND_EMBED_CHUNKS, KIND_EXTRACT_ENTITIES, KIND_PROCESS_DOCUMENT,
+    KIND_SYNTHESIZE_INSIGHT,
+};
 
 /// Dispatch a claimed job to its handler.
 pub async fn dispatch(ctx: &PipelineContext, kind: &str, payload: &Value) -> Result<()> {
@@ -21,6 +27,8 @@ pub async fn dispatch(ctx: &PipelineContext, kind: &str, payload: &Value) -> Res
         KIND_PROCESS_DOCUMENT => process_document(ctx, payload).await,
         KIND_EMBED_CHUNKS => embed_chunks(ctx, payload).await,
         KIND_EXTRACT_ENTITIES => extract_entities(ctx, payload).await,
+        KIND_ASSIGN_CLUSTERS => assign_clusters(ctx, payload).await,
+        KIND_SYNTHESIZE_INSIGHT => synthesize_insight(ctx, payload).await,
         other => Err(Error::new(
             ErrorKind::Invalid,
             format!("unknown job kind: {other}"),
@@ -252,6 +260,16 @@ async fn embed_chunks(ctx: &PipelineContext, payload: &Value) -> Result<()> {
     let rows: Vec<(Uuid, Vec<f32>)> = pairs.iter().map(|(id, _)| *id).zip(vectors).collect();
     tessera_db::repos::embeddings::insert_batch(pool, ctx.space_id, &rows).await?;
 
+    // Assign the freshly embedded chunks to clusters.
+    let embedded_ids: Vec<String> = rows.iter().map(|(id, _)| id.to_string()).collect();
+    queue::enqueue(
+        pool,
+        KIND_ASSIGN_CLUSTERS,
+        &json!({ "document_id": document_id, "chunk_ids": embedded_ids }),
+        &EnqueueOpts::default(),
+    )
+    .await?;
+
     // Progress + readiness. Whichever embed job observes the document fully
     // embedded flips it to ready (set_status is idempotent).
     let (total, embedded) = chunks::embedding_progress(pool, document_id, ctx.space_id).await?;
@@ -280,4 +298,192 @@ async fn embed_chunks(ctx: &PipelineContext, payload: &Value) -> Result<()> {
         .await;
     }
     Ok(())
+}
+
+/// Assign a batch of freshly embedded chunks to clusters (online nearest
+/// centroid, or seed a new cluster). Enqueues insight synthesis for clusters
+/// that have accumulated enough new members. Idempotent: a chunk already in a
+/// cluster is skipped.
+async fn assign_clusters(ctx: &PipelineContext, payload: &Value) -> Result<()> {
+    let document_id = payload_uuid(payload, "document_id")?;
+    let pool = &ctx.db.worker;
+
+    let chunk_ids: Vec<Uuid> = payload
+        .get("chunk_ids")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .filter_map(|s| Uuid::parse_str(s).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut dirty: HashSet<Uuid> = HashSet::new();
+
+    for chunk_id in chunk_ids {
+        // Idempotent: skip chunks already assigned.
+        if clusters::member_cluster(pool, chunk_id).await?.is_some() {
+            continue;
+        }
+        let Some(vec) = embeddings::get_vector(pool, chunk_id, ctx.space_id).await? else {
+            continue;
+        };
+
+        let cluster_id = match clusters::nearest(pool, ctx.space_id, &vec).await? {
+            Some((cid, dist)) if dist <= ctx.cluster_max_distance => {
+                clusters::assign(pool, cid, chunk_id, similarity(dist), ctx.space_id).await?;
+                cid
+            }
+            _ => {
+                // No cluster close enough: create one under the per-space advisory
+                // lock, re-checking after the lock so concurrent workers cannot
+                // birth twin clusters for the same region.
+                let mut tx = clusters::begin_locked(pool, ctx.space_id).await?;
+                match clusters::nearest(pool, ctx.space_id, &vec).await? {
+                    Some((cid, dist)) if dist <= ctx.cluster_max_distance => {
+                        drop(tx); // release the lock; the winner already created it
+                        clusters::assign(pool, cid, chunk_id, similarity(dist), ctx.space_id)
+                            .await?;
+                        cid
+                    }
+                    _ => {
+                        let cid =
+                            clusters::create(&mut *tx, ctx.space_id, &vec, chunk_id, 1.0).await?;
+                        tx.commit().await.map_err(|e| {
+                            Error::new(ErrorKind::Db, format!("cluster create: {e}"))
+                        })?;
+                        cid
+                    }
+                }
+            }
+        };
+        dirty.insert(cluster_id);
+    }
+
+    // Debounced synthesis for clusters that gained enough new members.
+    for cid in &dirty {
+        if let Some(cluster) = clusters::get(pool, *cid).await? {
+            if cluster.dirty_count >= ctx.cluster_dirty_threshold {
+                queue::enqueue(
+                    pool,
+                    KIND_SYNTHESIZE_INSIGHT,
+                    &json!({ "cluster_id": cid }),
+                    &EnqueueOpts {
+                        dedupe_key: Some(format!("synth:{cid}")),
+                        delay_secs: Some(ctx.synth_debounce_secs),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+            }
+        }
+    }
+
+    let _ = queue::notify(
+        pool,
+        &json!({ "type": "clusters.assigned", "document_id": document_id, "clusters": dirty.len() }),
+    )
+    .await;
+    Ok(())
+}
+
+/// Cosine similarity from cosine distance, clamped to [0, 1] and narrowed to f32.
+#[allow(clippy::cast_possible_truncation)]
+fn similarity(distance: f64) -> f32 {
+    (1.0 - distance).clamp(0.0, 1.0) as f32
+}
+
+/// Synthesize (or re-synthesize) the insight for a dirty cluster. Skips when the
+/// cluster's content signature is unchanged since the last insight.
+async fn synthesize_insight(ctx: &PipelineContext, payload: &Value) -> Result<()> {
+    let cluster_id = payload_uuid(payload, "cluster_id")?;
+    let pool = &ctx.db.worker;
+
+    if clusters::get(pool, cluster_id).await?.is_none() {
+        return Ok(());
+    }
+    let reps = clusters::representative_chunks(pool, cluster_id, ctx.space_id, 20).await?;
+    if reps.is_empty() {
+        return Ok(());
+    }
+    let entities = clusters::top_entities(pool, cluster_id, 15).await?;
+
+    // Dedup: if the cluster's content signature is unchanged, do not re-synthesize.
+    let input_hash = input_signature(cluster_id, &reps, &entities);
+    if insights::live_input_hash(pool, cluster_id).await? == Some(input_hash.clone()) {
+        clusters::reset_dirty(pool, cluster_id).await?;
+        return Ok(());
+    }
+
+    let synth = synth::synthesize(&ctx.llm, &reps, &entities).await?;
+
+    // Evidence comes from the cited context items; the citation leash means only
+    // resolving markers count. If the model cited nothing, fall back to the most
+    // representative chunk so the card is never uncorroborated.
+    let mut evidence = Vec::new();
+    if synth.cited.is_empty() {
+        if let Some(c) = reps.first() {
+            evidence.push(evidence_of(c));
+        }
+    } else {
+        for marker in &synth.cited {
+            if let Some(c) = reps.get(marker - 1) {
+                evidence.push(evidence_of(c));
+            }
+        }
+    }
+
+    let actions = serde_json::to_value(&synth.suggested_actions).unwrap_or_else(|_| json!([]));
+    insights::create(
+        pool,
+        &InsightInput {
+            cluster_id,
+            title: synth.title.clone(),
+            body_md: synth.narrative,
+            tags: Vec::new(),
+            severity: synth.severity,
+            confidence: synth.confidence,
+            suggested_actions: actions,
+            entity_ids: Vec::new(),
+            model: synth.model,
+            input_hash,
+            evidence,
+        },
+    )
+    .await?;
+
+    clusters::set_label(pool, cluster_id, &synth.title).await?;
+    clusters::reset_dirty(pool, cluster_id).await?;
+
+    let _ = queue::notify(
+        pool,
+        &json!({ "type": "insight.created", "cluster_id": cluster_id }),
+    )
+    .await;
+    Ok(())
+}
+
+fn evidence_of(c: &MemberChunk) -> EvidenceInput {
+    EvidenceInput {
+        chunk_id: c.chunk_id,
+        document_id: c.document_id,
+        entity_id: None,
+        note: None,
+    }
+}
+
+/// A stable signature of a cluster's synthesis inputs, used to skip
+/// re-synthesizing when nothing material changed.
+fn input_signature(
+    cluster_id: Uuid,
+    reps: &[MemberChunk],
+    entities: &[(String, String)],
+) -> Vec<u8> {
+    let mut parts: Vec<String> = reps.iter().map(|c| c.chunk_id.to_string()).collect();
+    parts.sort();
+    let mut ent: Vec<String> = entities.iter().map(|(k, v)| format!("{k}:{v}")).collect();
+    ent.sort();
+    let material = format!("{cluster_id}|{}|{}", parts.join(","), ent.join(","));
+    ContentHash::of(material.as_bytes()).as_bytes().to_vec()
 }

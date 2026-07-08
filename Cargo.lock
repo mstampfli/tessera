@@ -4145,6 +4145,7 @@ dependencies = [
 name = "tessera-pipeline"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "tessera-core",
  "tessera-db",

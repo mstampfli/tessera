@@ -158,8 +158,20 @@ pub async fn serve(config: Config) -> Result<()> {
 
     let bind = config.server.bind;
     let workers = config.pipeline.workers;
-    let embed_batch = config.pipeline.embed_batch;
     let db_url = config.database.url.clone();
+
+    // Pipeline context values (read before `config` is moved into the state).
+    let pipeline_ctx = tessera_pipeline::PipelineContext {
+        db: db.clone(),
+        cas: cas.clone(),
+        embedder: embedder.clone(),
+        llm: llm.clone(),
+        space_id: space.id,
+        embed_batch: config.pipeline.embed_batch,
+        cluster_max_distance: config.pipeline.cluster_max_distance,
+        cluster_dirty_threshold: config.pipeline.cluster_dirty_threshold,
+        synth_debounce_secs: config.pipeline.synth_debounce_secs,
+    };
 
     let state = AppState::new(AppStateParts {
         db: db.clone(),
@@ -174,8 +186,6 @@ pub async fn serve(config: Config) -> Result<()> {
     let forwarder = spawn_event_forwarder(db_url, state.events.clone());
 
     // Start the pipeline workers.
-    let pipeline_ctx =
-        tessera_pipeline::PipelineContext::new(db, cas, embedder, space.id, embed_batch);
     let pipeline = tessera_pipeline::run_pipeline(pipeline_ctx, workers);
 
     let app = tessera_api::build_router(state);

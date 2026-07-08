@@ -4,9 +4,11 @@
 pub mod api_tokens;
 pub mod audit;
 pub mod chunks;
+pub mod clusters;
 pub mod documents;
 pub mod embeddings;
 pub mod entities;
+pub mod insights;
 pub mod sessions;
 pub mod sources;
 pub mod users;

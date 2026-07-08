@@ -85,6 +85,17 @@ pub struct PipelineConfig {
     /// How many chunk ids go into one embedding job batch.
     #[serde(default = "default_embed_batch")]
     pub embed_batch: usize,
+    /// Max cosine distance for a chunk to join an existing cluster (model
+    /// dependent; the default suits nomic-embed-text).
+    #[serde(default = "default_cluster_max_distance")]
+    pub cluster_max_distance: f64,
+    /// New members a cluster must gain before its insight is re-synthesized.
+    #[serde(default = "default_dirty_threshold")]
+    pub cluster_dirty_threshold: i32,
+    /// Debounce before synthesizing a dirty cluster's insight, so a burst of
+    /// ingestion produces one synthesis, not many.
+    #[serde(default = "default_synth_debounce_secs")]
+    pub synth_debounce_secs: i64,
 }
 
 fn default_embedder() -> String {
@@ -122,6 +133,15 @@ fn default_workers() -> usize {
 }
 fn default_embed_batch() -> usize {
     64
+}
+fn default_cluster_max_distance() -> f64 {
+    0.4
+}
+fn default_dirty_threshold() -> i32 {
+    3
+}
+fn default_synth_debounce_secs() -> i64 {
+    30
 }
 
 impl Default for ProvidersConfig {
@@ -167,6 +187,9 @@ impl Default for PipelineConfig {
         Self {
             workers: default_workers(),
             embed_batch: default_embed_batch(),
+            cluster_max_distance: default_cluster_max_distance(),
+            cluster_dirty_threshold: default_dirty_threshold(),
+            synth_debounce_secs: default_synth_debounce_secs(),
         }
     }
 }

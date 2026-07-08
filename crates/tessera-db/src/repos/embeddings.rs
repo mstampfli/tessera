@@ -131,3 +131,16 @@ pub async fn count(pool: &PgPool, space_id: i16) -> Result<i64> {
         .await
         .map_err(map_sqlx)
 }
+
+/// Fetch a chunk's embedding vector in a space, if present.
+pub async fn get_vector(pool: &PgPool, chunk_id: Uuid, space_id: i16) -> Result<Option<Vec<f32>>> {
+    let row = sqlx::query_scalar::<_, Vector>(
+        "SELECT embedding FROM chunk_embeddings WHERE chunk_id = $1 AND space_id = $2",
+    )
+    .bind(chunk_id)
+    .bind(space_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(map_sqlx)?;
+    Ok(row.map(|v| v.to_vec()))
+}

@@ -7,6 +7,7 @@
 
 mod context;
 mod stages;
+mod synth;
 mod worker;
 
 pub use context::PipelineContext;
@@ -20,3 +21,7 @@ pub const KIND_EMBED_CHUNKS: &str = "embed_chunks";
 /// Job kind: extract security entities from a document's chunks and recompute
 /// its correlation edges.
 pub const KIND_EXTRACT_ENTITIES: &str = "extract_entities";
+/// Job kind: assign a batch of newly embedded chunks to clusters.
+pub const KIND_ASSIGN_CLUSTERS: &str = "assign_clusters";
+/// Job kind: synthesize (or re-synthesize) the insight for a dirty cluster.
+pub const KIND_SYNTHESIZE_INSIGHT: &str = "synthesize_insight";

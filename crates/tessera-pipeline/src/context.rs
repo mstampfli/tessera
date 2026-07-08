@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tessera_db::cas::CasStore;
 use tessera_db::Db;
-use tessera_providers::EmbeddingProvider;
+use tessera_providers::{EmbeddingProvider, LlmProvider};
 
 /// Everything a stage handler needs, cloneable across worker tasks.
 #[derive(Clone)]
@@ -12,27 +12,16 @@ pub struct PipelineContext {
     pub db: Db,
     pub cas: CasStore,
     pub embedder: Arc<dyn EmbeddingProvider>,
+    /// The generation provider used for insight synthesis (a fallback chain).
+    pub llm: Arc<dyn LlmProvider>,
     /// The active embedding space id that new vectors are written into.
     pub space_id: i16,
     /// Batch size for embedding jobs.
     pub embed_batch: usize,
-}
-
-impl PipelineContext {
-    #[must_use]
-    pub fn new(
-        db: Db,
-        cas: CasStore,
-        embedder: Arc<dyn EmbeddingProvider>,
-        space_id: i16,
-        embed_batch: usize,
-    ) -> Self {
-        Self {
-            db,
-            cas,
-            embedder,
-            space_id,
-            embed_batch,
-        }
-    }
+    /// Max cosine distance for a chunk to join an existing cluster.
+    pub cluster_max_distance: f64,
+    /// New members a cluster must gain before its insight is re-synthesized.
+    pub cluster_dirty_threshold: i32,
+    /// Debounce before synthesizing a dirty cluster.
+    pub synth_debounce_secs: i64,
 }
