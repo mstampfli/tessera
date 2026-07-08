@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { CorrelationGraph } from "@/components/CorrelationGraph";
@@ -17,6 +17,24 @@ export default function ClusterDetailPage({ params }: { params: Promise<{ id: st
     enabled: showGraph,
   });
   const c = detail.data?.cluster;
+
+  // Stable identity so a background refetch does not rebuild the graph.
+  const graphNodes = useMemo(
+    () =>
+      graph.data?.nodes.map((n) => ({
+        id: n.id,
+        label: n.value,
+        kind: n.kind,
+        weight: n.weight,
+      })) ?? [],
+    [graph.data],
+  );
+  const graphEdges = useMemo(
+    () =>
+      graph.data?.edges.map((e) => ({ source: e.src_id, target: e.dst_id, weight: e.source_count })) ??
+      [],
+    [graph.data],
+  );
 
   return (
     <div className="space-y-6">
@@ -45,17 +63,8 @@ export default function ClusterDetailPage({ params }: { params: Promise<{ id: st
         {showGraph && graph.data && (
           <CorrelationGraph
             ariaLabel={`Entity correlation network for this cluster: ${graph.data.nodes.length} entities`}
-            nodes={graph.data.nodes.map((n) => ({
-              id: n.id,
-              label: n.value,
-              kind: n.kind,
-              weight: n.weight,
-            }))}
-            edges={graph.data.edges.map((e) => ({
-              source: e.src_id,
-              target: e.dst_id,
-              weight: e.source_count,
-            }))}
+            nodes={graphNodes}
+            edges={graphEdges}
           />
         )}
         {showGraph && graph.data && graph.data.nodes.length === 0 && (

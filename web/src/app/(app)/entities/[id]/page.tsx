@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { CorrelationGraph } from "@/components/CorrelationGraph";
@@ -12,6 +12,28 @@ export default function EntityDetailPage({ params }: { params: Promise<{ id: str
   const [view, setView] = useState<"table" | "graph">("table");
 
   const e = detail.data?.entity;
+
+  // Stable node/edge identity so the WebGL graph (and the user's pan/zoom) is
+  // not torn down and rebuilt on every unrelated re-render.
+  const graphNodes = useMemo(() => {
+    if (!e || !detail.data) return [];
+    return [
+      { id: e.id, label: e.value, kind: e.kind, weight: e.mention_count },
+      ...detail.data.neighborhood.map((n) => ({
+        id: n.id,
+        label: n.value,
+        kind: n.kind,
+        weight: n.source_count,
+      })),
+    ];
+  }, [e, detail.data]);
+  const graphEdges = useMemo(
+    () =>
+      e && detail.data
+        ? detail.data.neighborhood.map((n) => ({ source: e.id, target: n.id, weight: n.score }))
+        : [],
+    [e, detail.data],
+  );
 
   return (
     <div className="space-y-6">
@@ -63,20 +85,8 @@ export default function EntityDetailPage({ params }: { params: Promise<{ id: str
           <CorrelationGraph
             centerId={e.id}
             ariaLabel={`Correlation graph for ${e.value}: ${detail.data.neighborhood.length} related entities`}
-            nodes={[
-              { id: e.id, label: e.value, kind: e.kind, weight: e.mention_count },
-              ...detail.data.neighborhood.map((n) => ({
-                id: n.id,
-                label: n.value,
-                kind: n.kind,
-                weight: n.source_count,
-              })),
-            ]}
-            edges={detail.data.neighborhood.map((n) => ({
-              source: e.id,
-              target: n.id,
-              weight: n.score,
-            }))}
+            nodes={graphNodes}
+            edges={graphEdges}
           />
         )}
         {detail.data && detail.data.neighborhood.length > 0 && view === "table" && (
