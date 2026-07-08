@@ -3,6 +3,11 @@
 [advisories]
 version = 2
 yanked = "deny"
+# Deliberate, narrow risk-acceptance (not a blanket unmaintained ignore):
+# RUSTSEC-2024-0436 is an "unmaintained" notice for `paste`, not a vulnerability.
+# It is a compile-time-only proc-macro reached transitively via
+# tokenizers -> fastembed, with no upgrade path we control; no runtime footprint.
+ignore = ["RUSTSEC-2024-0436"]
 
 [licenses]
 version = 2
@@ -18,6 +23,9 @@ allow = [
     "Zlib",
     "MPL-2.0",
     "CDLA-Permissive-2.0",
+    # Permissive, OSI-approved (University of Illinois/NCSA, as used by LLVM);
+    # reaches the graph only under --all-features via rav1e -> libfuzzer-sys.
+    "NCSA",
 ]
 confidence-threshold = 0.9
 
