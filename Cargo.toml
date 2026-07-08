@@ -73,6 +73,7 @@ async-trait = "0.1"
 tokio-util = "0.7"
 futures = "0.3"
 url = "2"
+libc = "0.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

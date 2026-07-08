@@ -4119,6 +4119,7 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "infer",
+ "libc",
  "psl",
  "pulldown-cmark",
  "regex",
@@ -4128,6 +4129,7 @@ dependencies = [
  "tessera-core",
  "text-splitter",
  "thiserror",
+ "tokio",
  "url",
 ]
 

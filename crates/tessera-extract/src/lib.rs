@@ -7,6 +7,7 @@
 
 pub mod chunk;
 pub mod extractors;
+pub mod plugin;
 pub mod security;
 pub mod sniff;
 
