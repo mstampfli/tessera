@@ -89,6 +89,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .merge(routes::health::router())
         .merge(metrics::router())
+        .merge(routes::mcp::router())
         .nest("/v1", routes::v1_router())
         .layer(axum::middleware::from_fn(metrics::track_http))
         .layer(axum::extract::DefaultBodyLimit::max(GLOBAL_BODY_LIMIT))

@@ -33,6 +33,5 @@ pub fn v1_router() -> Router<AppState> {
         .merge(clusters::router())
         .merge(sources::router())
         .merge(jobs::router())
-        .merge(mcp::router())
         .merge(events::router())
 }
