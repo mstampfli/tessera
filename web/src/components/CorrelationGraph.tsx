@@ -160,7 +160,8 @@ export function CorrelationGraph({
               ? semanticColor
               : edgeColor;
         graph.addEdge(e.source, e.target, {
-          size: (bridge ? 1.0 : 0.5) + (e.weight / maxEdgeW) * 3.5,
+          // A wider floor keeps thin edges hittable for hover/click.
+          size: (bridge ? 1.6 : 1.2) + (e.weight / maxEdgeW) * 3.0,
           color,
           method: bridge ? "bridge" : (e.method ?? "co_occurs"),
           strength: e.weight,
@@ -202,6 +203,8 @@ export function CorrelationGraph({
         defaultNodeColor: nodeColor,
         defaultEdgeColor: edgeColor,
         defaultDrawNodeHover: drawHoverLabel,
+        // Sigma does not emit edge hover/click events unless asked.
+        enableEdgeEvents: true,
         minCameraRatio: 0.3,
         maxCameraRatio: 3,
       }) as unknown as SigmaLike;

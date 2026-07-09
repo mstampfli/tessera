@@ -5,13 +5,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { CorrelationGraph } from "@/components/CorrelationGraph";
+import { CorrelationReason } from "@/components/CorrelationReason";
 
 const NODE_CAP = 250;
+
+function methodColor(method: string): string {
+  if (method === "similar") return "var(--mk-clay-1)";
+  if (method === "temporal") return "var(--mk-green-1)";
+  return "var(--mk-accent)";
+}
 
 export default function GraphPage() {
   const [kind, setKind] = useState<string>("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<{ a: string; b: string } | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [kinds, setKinds] = useState<string[]>([]);
 
   const q = useQuery({
@@ -23,6 +31,12 @@ export default function GraphPage() {
     queryKey: ["correlation", selectedEdge?.a, selectedEdge?.b],
     queryFn: () => api.correlation(selectedEdge!.a, selectedEdge!.b),
     enabled: !!selectedEdge,
+  });
+  // The inline "why" for an expanded neighbour in the node inspector.
+  const whyQ = useQuery({
+    queryKey: ["correlation", selectedId, expanded],
+    queryFn: () => api.correlation(selectedId!, expanded!),
+    enabled: !!selectedId && !!expanded,
   });
 
   // Learn the full kind list from the unfiltered view so the filter chips stay
@@ -37,6 +51,11 @@ export default function GraphPage() {
   useEffect(() => {
     setSelectedId(null);
   }, [kind]);
+
+  // Collapse the inline "why" when the selected node changes.
+  useEffect(() => {
+    setExpanded(null);
+  }, [selectedId]);
 
   const graphNodes = useMemo(
     () =>
@@ -91,7 +110,16 @@ export default function GraphPage() {
               ? "loading ..."
               : `showing ${shown} of ${total} entities${
                   shown < total ? ` (most-connected first, capped at ${NODE_CAP})` : ""
-                }. click a node to inspect it.`}
+                }.`}
+          </p>
+          <p className="mt-1 text-[11px]" style={{ color: "var(--mk-text-3)" }}>
+            click a node to inspect its correlations · hover a line for the link, click it
+            for the evidence. lines:{" "}
+            <span style={{ color: "var(--mk-accent)" }}>co-occurs</span>{" "}
+            <span style={{ color: "var(--mk-clay-1)" }}>contextual</span>{" "}
+            <span style={{ color: "var(--mk-green-1)" }}>same-time</span>{" "}
+            <span style={{ color: "var(--mk-highlight)" }}>bridge</span>; node colour =
+            community.
           </p>
         </div>
         <div className="flex flex-wrap gap-1" role="group" aria-label="filter by kind">
@@ -158,64 +186,14 @@ export default function GraphPage() {
               )}
               {corrQ.data && (
                 <>
-                  <p className="font-mono text-xs" style={{ color: "var(--mk-text-2)" }}>
+                  <p className="mb-2 font-mono text-xs" style={{ color: "var(--mk-text-2)" }}>
                     {corrQ.data.a.kind.replace("hash_", "")}: {corrQ.data.a.value}
                     <br />
                     <span style={{ color: "var(--mk-text-3)" }}>&harr;</span>
                     <br />
                     {corrQ.data.b.kind.replace("hash_", "")}: {corrQ.data.b.value}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {corrQ.data.links.map((l) => (
-                      <span key={l.method} className="mk-tag">
-                        {l.method === "similar"
-                          ? "contextual"
-                          : l.method === "temporal"
-                            ? "same time"
-                            : "co-occurs"}{" "}
-                        {Math.round(l.strength * 100)}
-                      </span>
-                    ))}
-                  </div>
-                  {corrQ.data.shared_chunks.length > 0 ? (
-                    <>
-                      <p className="mk-kicker mt-4">stated together in</p>
-                      {corrQ.data.shared_chunks.map((c) => (
-                        <Link
-                          key={c.chunk_id}
-                          href={`/documents/${c.document_id}?chunk=${c.chunk_id}`}
-                          className="mk-card mt-2 block p-2 text-xs"
-                          style={{ color: "var(--mk-text-2)" }}
-                        >
-                          {c.excerpt}
-                        </Link>
-                      ))}
-                    </>
-                  ) : (
-                    <>
-                      <p className="mk-kicker mt-4">
-                        never stated together; each appears in
-                      </p>
-                      {[corrQ.data.a_sample, corrQ.data.b_sample].filter(Boolean).map(
-                        (c) =>
-                          c && (
-                            <Link
-                              key={c.chunk_id}
-                              href={`/documents/${c.document_id}?chunk=${c.chunk_id}`}
-                              className="mk-card mt-2 block p-2 text-xs"
-                              style={{ color: "var(--mk-text-2)" }}
-                            >
-                              {c.event_time && (
-                                <span className="mk-tag mk-tag--success mr-1">
-                                  {c.event_time.slice(0, 10)}
-                                </span>
-                              )}
-                              {c.excerpt}
-                            </Link>
-                          ),
-                      )}
-                    </>
-                  )}
+                  <CorrelationReason detail={corrQ.data} />
                 </>
               )}
             </div>
@@ -286,34 +264,57 @@ export default function GraphPage() {
 
               {neighbors.length > 0 && (
                 <>
-                  <p className="mk-kicker mt-4">correlated with</p>
+                  <p className="mk-kicker mt-4">correlated with — tap one for why</p>
                   <ul className="mt-2 space-y-1">
-                    {neighbors.slice(0, 20).map(({ node, strength, method }) => (
-                      <li key={node.id}>
-                        <button
-                          className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs hover:underline"
-                          onClick={() => setSelectedId(node.id)}
-                          style={{ color: "var(--mk-text-2)" }}
-                          title={method === "similar" ? "contextual similarity" : "co-occurs directly"}
+                    {neighbors.slice(0, 20).map(({ node, strength, method }) => {
+                      const open = expanded === node.id;
+                      return (
+                        <li
+                          key={node.id}
+                          className="rounded"
+                          style={{ background: open ? "var(--mk-surface-2)" : undefined }}
                         >
-                          <span className="mk-tag">{node.kind.replace("hash_", "")}</span>
-                          <span className="truncate font-mono">{node.value}</span>
-                          <span
-                            className="ml-auto font-mono"
-                            style={{
-                              color: method === "similar" ? "var(--mk-text-3)" : "var(--mk-accent)",
-                            }}
+                          <button
+                            className="flex w-full items-center gap-2 px-1 py-1 text-left text-xs"
+                            onClick={() => setExpanded(open ? null : node.id)}
+                            aria-expanded={open}
                           >
-                            {Math.round(strength * 100)}
-                            {method === "similar" ? "~" : ""}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                            <span style={{ color: "var(--mk-text-3)", width: 9 }}>
+                              {open ? "▾" : "▸"}
+                            </span>
+                            <span className="mk-tag">{node.kind.replace("hash_", "")}</span>
+                            <span className="truncate font-mono" style={{ color: "var(--mk-text-2)" }}>
+                              {node.value}
+                            </span>
+                            <span className="ml-auto font-mono" style={{ color: methodColor(method) }}>
+                              {Math.round(strength * 100)}
+                            </span>
+                          </button>
+                          {open && (
+                            <div className="px-2 pb-2">
+                              {whyQ.isLoading && (
+                                <p className="text-[11px]" style={{ color: "var(--mk-text-3)" }}>
+                                  loading ...
+                                </p>
+                              )}
+                              {whyQ.data && <CorrelationReason detail={whyQ.data} />}
+                              <button
+                                className="mk-btn mt-2 text-[11px]"
+                                onClick={() => setSelectedId(node.id)}
+                              >
+                                focus this entity
+                              </button>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
-                  <p className="mt-2 text-[11px]" style={{ color: "var(--mk-text-3)" }}>
-                    number = correlation strength (0-100). ~ marks a contextual
-                    (semantic) link; solid values are direct co-occurrences.
+                  <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]" style={{ color: "var(--mk-text-3)" }}>
+                    <span style={{ color: "var(--mk-accent)" }}>&#9632; co-occurs</span>
+                    <span style={{ color: "var(--mk-clay-1)" }}>&#9632; contextual</span>
+                    <span style={{ color: "var(--mk-green-1)" }}>&#9632; same time</span>
+                    <span>number = strength 0-100</span>
                   </p>
                 </>
               )}
