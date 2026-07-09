@@ -49,12 +49,13 @@ pub async fn graph(
     }
 
     let ids: Vec<Uuid> = nodes.iter().map(|n| n.id).collect();
-    let edges = sqlx::query_as::<_, GraphEdge>(
-        "SELECT edge.src_id, edge.dst_id, edge.rel, edge.source_count
+    let edges = sqlx::query_as::<_, GraphEdge>(&format!(
+        "SELECT edge.src_id, edge.dst_id, edge.rel AS method,
+                ({EDGE_STRENGTH_SQL})::float8 AS strength
          FROM entity_edges edge
          WHERE edge.src_id = ANY($1) AND edge.dst_id = ANY($1)
-         ORDER BY edge.source_count DESC, edge.src_id, edge.dst_id",
-    )
+         ORDER BY strength DESC, edge.src_id, edge.dst_id",
+    ))
     .bind(&ids)
     .fetch_all(pool)
     .await
@@ -63,111 +64,179 @@ pub async fn graph(
     Ok((nodes, edges))
 }
 
-/// A semantic-similarity edge between two entities: they are discussed in
-/// similar contexts (cosine similarity of their mean mention-chunk embeddings),
-/// even if they never co-occur in the same chunk.
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct SemanticEdge {
-    pub src_id: Uuid,
-    pub dst_id: Uuid,
-    pub sim: f64,
-}
+/// The relation name for a semantic-similarity edge in `entity_edges`.
+pub const REL_SIMILAR: &str = "similar";
+/// The relation name for a direct co-occurrence edge.
+pub const REL_CO_OCCURS: &str = "co_occurs";
 
-/// For each entity in `ids`, its `k` most semantically similar peers within the
-/// same set, by cosine similarity of the mean of the entity's mention-chunk
-/// embeddings. Relative (top-k), not an absolute threshold: embeddings of short
-/// technical text cluster tightly, so a fixed cutoff would either connect
-/// everything or nothing; top-k surfaces each entity's nearest peers regardless.
-/// `min_sim` is only a floor to drop near-orthogonal pairs. Bounded work: the
-/// caller passes an already-capped node set, so this is O(cap^2).
-pub async fn semantic_edges(
+/// SQL expression mapping an `entity_edges` row (aliased `edge`) to a correlation
+/// strength in `[0, 1]`: direct co-occurrence sits in a strong band by shared-
+/// chunk count; every other method (semantic, temporal) uses its stored weight.
+/// One source of truth so the graph and the neighbourhood agree.
+pub const EDGE_STRENGTH_SQL: &str = "CASE WHEN edge.rel = 'co_occurs' \
+     THEN LEAST(1.0, 0.6 + 0.08 * edge.source_count) \
+     ELSE GREATEST(0.0, LEAST(1.0, edge.weight)) END";
+
+/// (Re)materialize the mean context embedding for each entity in `ids` from the
+/// embeddings of the chunks it is mentioned in. Idempotent: recomputes from the
+/// current mentions, so re-running after new mentions converges. Entities with
+/// no embedded mention chunks yet are skipped (they get one on a later run).
+pub async fn recompute_entity_embeddings(
     pool: &PgPool,
     space_id: i16,
     ids: &[Uuid],
-    k: i64,
-    min_sim: f64,
-) -> Result<Vec<SemanticEdge>> {
-    if ids.len() < 2 {
-        return Ok(Vec::new());
+) -> Result<u64> {
+    if ids.is_empty() {
+        return Ok(0);
     }
-    sqlx::query_as::<_, SemanticEdge>(
-        "WITH emb AS (
-             SELECT em.entity_id AS id, avg(ce.embedding) AS v
-             FROM entity_mentions em
-             JOIN chunk_embeddings ce ON ce.chunk_id = em.chunk_id AND ce.space_id = $2
-             WHERE em.entity_id = ANY($1)
-             GROUP BY em.entity_id
-         ),
-         pairs AS (
-             SELECT a.id AS src_id, b.id AS dst_id,
-                    (1.0 - (a.v <=> b.v))::float8 AS sim,
-                    row_number() OVER (PARTITION BY a.id ORDER BY a.v <=> b.v) AS rnk
-             FROM emb a JOIN emb b ON a.id <> b.id
-         )
-         SELECT src_id, dst_id, sim FROM pairs
-         WHERE rnk <= $3 AND sim >= $4",
+    let n = sqlx::query(
+        "INSERT INTO entity_embeddings (entity_id, space_id, embedding, updated_at)
+         SELECT em.entity_id, $2, avg(ce.embedding), now()
+         FROM entity_mentions em
+         JOIN chunk_embeddings ce ON ce.chunk_id = em.chunk_id AND ce.space_id = $2
+         WHERE em.entity_id = ANY($1)
+         GROUP BY em.entity_id
+         ON CONFLICT (entity_id, space_id)
+         DO UPDATE SET embedding = EXCLUDED.embedding, updated_at = now()",
     )
     .bind(ids)
     .bind(space_id)
+    .execute(pool)
+    .await
+    .map_err(map_sqlx)?
+    .rows_affected();
+    Ok(n)
+}
+
+/// Materialize context embeddings for every entity with embedded mention chunks
+/// (the backfill path for an existing corpus).
+pub async fn recompute_all_entity_embeddings(pool: &PgPool, space_id: i16) -> Result<u64> {
+    let n = sqlx::query(
+        "INSERT INTO entity_embeddings (entity_id, space_id, embedding, updated_at)
+         SELECT em.entity_id, $1, avg(ce.embedding), now()
+         FROM entity_mentions em
+         JOIN chunk_embeddings ce ON ce.chunk_id = em.chunk_id AND ce.space_id = $1
+         GROUP BY em.entity_id
+         ON CONFLICT (entity_id, space_id)
+         DO UPDATE SET embedding = EXCLUDED.embedding, updated_at = now()",
+    )
+    .bind(space_id)
+    .execute(pool)
+    .await
+    .map_err(map_sqlx)?
+    .rows_affected();
+    Ok(n)
+}
+
+/// One entity's global nearest neighbours by context-embedding cosine similarity,
+/// via the entity HNSW index (O(log n), not an all-pairs scan). `min_sim` drops
+/// near-orthogonal pairs; ranking is relative (top-k) because short technical
+/// text embeds tightly.
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct SimNeighbor {
+    id: Uuid,
+    sim: f64,
+}
+
+/// Add the `similar` edges out of one entity: find its global nearest neighbours
+/// (via the entity HNSW index) and upsert an undirected `similar` edge (src < dst)
+/// to each above `min_sim`, weighted by cosine similarity. Add-only by design:
+/// the edge is undirected, so a neighbour that has *this* entity in its own top-k
+/// must not be dropped just because this entity's top-k shifted. A full rebuild
+/// ([`rebuild_similar_edges`]) prunes edges an embedding change made stale.
+pub async fn add_similar_edges(
+    pool: &PgPool,
+    space_id: i16,
+    dim: i32,
+    entity_id: Uuid,
+    k: i64,
+    min_sim: f64,
+) -> Result<u64> {
+    // The `halfvec(dim)` cast matches the entity HNSW index expression, so this
+    // is an index scan (O(log n)) rather than a full pass over every entity.
+    let neighbors = sqlx::query_as::<_, SimNeighbor>(&format!(
+        "SELECT e.entity_id AS id,
+                (1.0 - (e.embedding::halfvec({dim}) <=> t.embedding::halfvec({dim})))::float8 AS sim
+         FROM entity_embeddings e
+         JOIN entity_embeddings t ON t.entity_id = $1 AND t.space_id = $2
+         WHERE e.space_id = $2 AND e.entity_id <> $1
+         ORDER BY e.embedding::halfvec({dim}) <=> t.embedding::halfvec({dim})
+         LIMIT $3",
+    ))
+    .bind(entity_id)
+    .bind(space_id)
     .bind(k)
-    .bind(min_sim)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+
+    let mut written = 0u64;
+    for n in neighbors {
+        if n.sim < min_sim {
+            continue;
+        }
+        let (a, b) = if entity_id <= n.id {
+            (entity_id, n.id)
+        } else {
+            (n.id, entity_id)
+        };
+        written += sqlx::query(
+            "INSERT INTO entity_edges (src_id, dst_id, rel, source_count, weight, first_seen, last_seen)
+             VALUES ($1, $2, 'similar', 0, $3, now(), now())
+             ON CONFLICT (src_id, dst_id, rel)
+             DO UPDATE SET weight = EXCLUDED.weight, last_seen = now()",
+        )
+        .bind(a)
+        .bind(b)
+        .bind(n.sim)
+        .execute(pool)
+        .await
+        .map_err(map_sqlx)?
+        .rows_affected();
+    }
+    Ok(written)
+}
+
+/// Rebuild every `similar` edge from scratch: drop all of them, then recompute
+/// each embedded entity's top-k. Used to backfill an existing corpus and as a
+/// periodic maintenance pass that prunes edges made stale by embedding drift.
+pub async fn rebuild_similar_edges(
+    pool: &PgPool,
+    space_id: i16,
+    dim: i32,
+    k: i64,
+    min_sim: f64,
+) -> Result<u64> {
+    sqlx::query("DELETE FROM entity_edges WHERE rel = 'similar'")
+        .execute(pool)
+        .await
+        .map_err(map_sqlx)?;
+    let ids = ids_with_embeddings(pool, space_id).await?;
+    let mut total = 0u64;
+    for id in ids {
+        total += add_similar_edges(pool, space_id, dim, id, k, min_sim).await?;
+    }
+    Ok(total)
+}
+
+/// Every entity id that currently has a materialized embedding in a space.
+pub async fn ids_with_embeddings(pool: &PgPool, space_id: i16) -> Result<Vec<Uuid>> {
+    sqlx::query_scalar::<_, Uuid>("SELECT entity_id FROM entity_embeddings WHERE space_id = $1")
+        .bind(space_id)
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx)
+}
+
+/// The entity ids mentioned in a document (for the correlation stage).
+pub async fn ids_for_document(pool: &PgPool, document_id: Uuid) -> Result<Vec<Uuid>> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT DISTINCT entity_id FROM entity_mentions WHERE document_id = $1",
+    )
+    .bind(document_id)
     .fetch_all(pool)
     .await
     .map_err(map_sqlx)
-}
-
-/// A unified correlation edge: either a direct co-occurrence (strong) or a
-/// semantic similarity (contextual), each with a `strength` in `[0, 1]` so the
-/// UI can render one continuous "how correlated" scale.
-#[derive(Debug, Clone)]
-pub struct CorrelationEdge {
-    pub src_id: Uuid,
-    pub dst_id: Uuid,
-    pub method: &'static str,
-    pub strength: f64,
-}
-
-/// Merge co-occurrence and semantic edges into one strength-scored set. Direct
-/// co-occurrence is the stronger, precise signal and always wins for a pair;
-/// semantic similarity fills in the "slighter" correlations between entities
-/// that never share a chunk. Both endpoints are normalized to one unordered key.
-#[must_use]
-pub fn merge_correlation_edges(
-    cooccurrence: &[GraphEdge],
-    semantic: &[SemanticEdge],
-) -> Vec<CorrelationEdge> {
-    use std::collections::HashMap;
-    let key = |a: Uuid, b: Uuid| if a <= b { (a, b) } else { (b, a) };
-    let mut map: HashMap<(Uuid, Uuid), CorrelationEdge> = HashMap::new();
-
-    for e in cooccurrence {
-        // Direct co-occurrence sits in the strong band; more shared chunks -> stronger.
-        let strength = (0.6 + 0.08 * f64::from(e.source_count)).min(1.0);
-        let (a, b) = key(e.src_id, e.dst_id);
-        map.insert(
-            (a, b),
-            CorrelationEdge {
-                src_id: a,
-                dst_id: b,
-                method: "co_occurs",
-                strength,
-            },
-        );
-    }
-    for s in semantic {
-        if s.src_id == s.dst_id {
-            continue;
-        }
-        let (a, b) = key(s.src_id, s.dst_id);
-        // Only fill a pair the stronger co-occurrence signal did not already claim.
-        map.entry((a, b)).or_insert(CorrelationEdge {
-            src_id: a,
-            dst_id: b,
-            method: "similar",
-            strength: s.sim.clamp(0.0, 1.0),
-        });
-    }
-    map.into_values().collect()
 }
 
 /// Total number of entities (optionally filtered to one kind), so callers can
@@ -349,27 +418,30 @@ pub struct Neighbor {
     pub kind: String,
     pub value: String,
     pub display_value: String,
+    /// The correlation method: `co_occurs` (direct) or `similar` (semantic).
     pub rel: String,
-    pub source_count: i32,
-    /// idf-weighted correlation score (rarer shared neighbors rank higher).
-    pub score: f64,
+    /// Correlation strength in `[0, 1]`.
+    pub strength: f64,
 }
 
-/// The correlation neighborhood of an entity: its strongest co-occurring
-/// entities, ranked by shared-chunk count weighted by the neighbor's rarity
-/// (idf), so a shared rare hash outranks a shared common port.
+/// The correlation neighborhood of an entity: its strongest correlations across
+/// the whole KB (direct co-occurrence and semantic similarity), ranked by
+/// strength, with the neighbor's rarity (idf) breaking ties so a shared rare
+/// hash outranks a shared common port.
 pub async fn neighborhood(pool: &PgPool, entity_id: Uuid, limit: i64) -> Result<Vec<Neighbor>> {
-    sqlx::query_as::<_, Neighbor>(
+    sqlx::query_as::<_, Neighbor>(&format!(
         "WITH tc AS (SELECT GREATEST(count(*), 1)::float8 AS n FROM chunks)
-         SELECT e2.id, e2.kind, e2.value, e2.display_value, edge.rel, edge.source_count,
-                (edge.source_count * ln(1.0 + (SELECT n FROM tc) / GREATEST(e2.mention_count, 1)))::float8 AS score
+         SELECT e2.id, e2.kind, e2.value, e2.display_value, edge.rel,
+                ({EDGE_STRENGTH_SQL})::float8 AS strength
          FROM entity_edges edge
          JOIN entities e2
            ON e2.id = CASE WHEN edge.src_id = $1 THEN edge.dst_id ELSE edge.src_id END
          WHERE edge.src_id = $1 OR edge.dst_id = $1
-         ORDER BY score DESC, e2.id
+         ORDER BY strength DESC,
+                  (edge.source_count * ln(1.0 + (SELECT n FROM tc) / GREATEST(e2.mention_count, 1))) DESC,
+                  e2.id
          LIMIT $2",
-    )
+    ))
     .bind(entity_id)
     .bind(limit)
     .fetch_all(pool)

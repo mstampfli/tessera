@@ -23,7 +23,7 @@ export default function EntityDetailPage({ params }: { params: Promise<{ id: str
         id: n.id,
         label: n.value,
         kind: n.kind,
-        weight: n.source_count,
+        weight: n.strength,
       })),
     ];
   }, [e, detail.data]);
@@ -33,8 +33,8 @@ export default function EntityDetailPage({ params }: { params: Promise<{ id: str
         ? detail.data.neighborhood.map((n) => ({
             source: e.id,
             target: n.id,
-            weight: n.score,
-            method: "co_occurs",
+            weight: n.strength,
+            method: n.method,
           }))
         : [],
     [e, detail.data],
@@ -99,9 +99,8 @@ export default function EntityDetailPage({ params }: { params: Promise<{ id: str
             <thead>
               <tr className="text-left font-mono text-xs" style={{ color: "var(--mk-text-3)" }}>
                 <th className="pb-2">correlate</th>
-                <th className="pb-2">rel</th>
-                <th className="pb-2 text-right">shared</th>
-                <th className="pb-2 text-right">score</th>
+                <th className="pb-2">method</th>
+                <th className="pb-2 text-right">strength</th>
               </tr>
             </thead>
             <tbody>
@@ -118,13 +117,13 @@ export default function EntityDetailPage({ params }: { params: Promise<{ id: str
                     </Link>
                   </td>
                   <td className="py-2 font-mono text-xs" style={{ color: "var(--mk-text-3)" }}>
-                    {n.rel}
+                    {n.method === "similar" ? "contextual" : "co-occurs"}
                   </td>
-                  <td className="py-2 text-right font-mono" style={{ color: "var(--mk-text-2)" }}>
-                    {n.source_count}
-                  </td>
-                  <td className="py-2 text-right font-mono" style={{ color: "var(--mk-text-2)" }}>
-                    {n.score.toFixed(2)}
+                  <td
+                    className="py-2 text-right font-mono"
+                    style={{ color: n.method === "similar" ? "var(--mk-text-3)" : "var(--mk-accent)" }}
+                  >
+                    {Math.round(n.strength * 100)}
                   </td>
                 </tr>
               ))}

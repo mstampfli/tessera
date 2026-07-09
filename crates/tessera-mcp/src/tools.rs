@@ -201,8 +201,8 @@ pub async fn call(state: &McpState, name: &str, args: &Value) -> Result<String, 
                 .into_iter()
                 .map(|n| {
                     json!({
-                        "kind": n.kind, "value": n.value, "rel": n.rel,
-                        "shared": n.source_count, "score": n.score
+                        "kind": n.kind, "value": n.value, "method": n.rel,
+                        "strength": n.strength
                     })
                 })
                 .collect();

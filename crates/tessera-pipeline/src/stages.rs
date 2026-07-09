@@ -17,8 +17,8 @@ use uuid::Uuid;
 use crate::context::PipelineContext;
 use crate::synth;
 use crate::{
-    KIND_ASSIGN_CLUSTERS, KIND_EMBED_CHUNKS, KIND_EXTRACT_ENTITIES, KIND_PROCESS_DOCUMENT,
-    KIND_SYNTHESIZE_INSIGHT,
+    KIND_ASSIGN_CLUSTERS, KIND_CORRELATE_ENTITIES, KIND_EMBED_CHUNKS, KIND_EXTRACT_ENTITIES,
+    KIND_PROCESS_DOCUMENT, KIND_SYNTHESIZE_INSIGHT,
 };
 
 /// Dispatch a claimed job to its handler.
@@ -29,11 +29,49 @@ pub async fn dispatch(ctx: &PipelineContext, kind: &str, payload: &Value) -> Res
         KIND_EXTRACT_ENTITIES => extract_entities(ctx, payload).await,
         KIND_ASSIGN_CLUSTERS => assign_clusters(ctx, payload).await,
         KIND_SYNTHESIZE_INSIGHT => synthesize_insight(ctx, payload).await,
+        KIND_CORRELATE_ENTITIES => correlate_entities(ctx, payload).await,
         other => Err(Error::new(
             ErrorKind::Invalid,
             format!("unknown job kind: {other}"),
         )),
     }
+}
+
+/// Materialize the document's entity embeddings and (re)compute their global
+/// semantic-similarity edges across the whole KB. Enqueued after both entity
+/// extraction and embedding, and idempotent: it recomputes from current state,
+/// so running before every chunk is embedded just converges on a later pass.
+async fn correlate_entities(ctx: &PipelineContext, payload: &Value) -> Result<()> {
+    let document_id = payload_uuid(payload, "document_id")?;
+    let pool = &ctx.db.worker;
+
+    let ids = entities::ids_for_document(pool, document_id).await?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    // Update each entity's context embedding from its (currently embedded) chunks,
+    // then link it to its global nearest neighbours. Add-only per entity; a
+    // full rebuild (the backfill CLI) prunes edges made stale by embedding drift.
+    entities::recompute_entity_embeddings(pool, ctx.space_id, &ids).await?;
+    let mut linked = 0u64;
+    for id in &ids {
+        linked += entities::add_similar_edges(
+            pool,
+            ctx.space_id,
+            ctx.space_dim,
+            *id,
+            ctx.semantic_k,
+            ctx.semantic_min_sim,
+        )
+        .await?;
+    }
+
+    let _ = queue::notify(
+        pool,
+        &json!({ "type": "entities.correlated", "document_id": document_id, "edges": linked }),
+    )
+    .await;
+    Ok(())
 }
 
 fn payload_uuid(payload: &Value, key: &str) -> Result<Uuid> {
@@ -222,6 +260,16 @@ async fn extract_entities(ctx: &PipelineContext, payload: &Value) -> Result<()> 
     entities::recompute_mention_counts(pool, &ids).await?;
     entities::recompute_cooccurrence(pool, document_id).await?;
 
+    // Entities now exist; correlate them once their chunks are embedded. Enqueued
+    // from here and from embed completion so whichever finishes last does the work.
+    queue::enqueue(
+        pool,
+        KIND_CORRELATE_ENTITIES,
+        &json!({ "document_id": document_id }),
+        &EnqueueOpts::default(),
+    )
+    .await?;
+
     let _ = queue::notify(
         pool,
         &json!({ "type": "entities.extracted", "document_id": document_id, "entities": ids.len() }),
@@ -297,6 +345,14 @@ async fn embed_chunks(ctx: &PipelineContext, payload: &Value) -> Result<()> {
 
     if total > 0 && embedded >= total {
         documents::set_status(pool, document_id, "ready", None, true).await?;
+        // All chunks embedded: (re)correlate this document's entities globally.
+        queue::enqueue(
+            pool,
+            KIND_CORRELATE_ENTITIES,
+            &json!({ "document_id": document_id }),
+            &EnqueueOpts::default(),
+        )
+        .await?;
         let _ = queue::notify(
             pool,
             &json!({

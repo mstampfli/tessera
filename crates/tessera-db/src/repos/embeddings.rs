@@ -96,6 +96,21 @@ pub async fn ensure_hnsw_index(pool: &PgPool, space_id: i16, dim: i32) -> Result
     Ok(())
 }
 
+/// The HNSW index over per-entity embeddings, mirroring the chunk index, so
+/// global nearest-neighbour correlation is O(log n) per entity.
+pub async fn ensure_entity_hnsw_index(pool: &PgPool, space_id: i16, dim: i32) -> Result<()> {
+    let index_name = format!("ee_hnsw_s{space_id}");
+    let sql = format!(
+        "CREATE INDEX IF NOT EXISTS {index_name}
+         ON entity_embeddings
+         USING hnsw ((embedding::halfvec({dim})) halfvec_cosine_ops)
+         WITH (m = 16, ef_construction = 64)
+         WHERE space_id = {space_id}"
+    );
+    sqlx::query(&sql).execute(pool).await.map_err(map_sqlx)?;
+    Ok(())
+}
+
 /// Insert a batch of `(chunk_id, embedding)` pairs for a space. Idempotent on
 /// `(chunk_id, space_id)`.
 pub async fn insert_batch(pool: &PgPool, space_id: i16, rows: &[(Uuid, Vec<f32>)]) -> Result<u64> {

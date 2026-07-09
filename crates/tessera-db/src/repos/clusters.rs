@@ -261,14 +261,14 @@ pub struct GraphNode {
     pub weight: i64,
 }
 
-/// An edge in a cluster's entity graph: a co-occurrence between two entities
-/// that are both in the cluster's node set.
+/// An edge in an entity graph: a correlation between two entities, with the
+/// method (`co_occurs` direct, or `similar` semantic) and a strength in `[0, 1]`.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct GraphEdge {
     pub src_id: Uuid,
     pub dst_id: Uuid,
-    pub rel: String,
-    pub source_count: i32,
+    pub method: String,
+    pub strength: f64,
 }
 
 /// The entity co-occurrence subgraph for a cluster: the entities mentioned in
@@ -302,12 +302,14 @@ pub async fn graph(
     }
 
     let ids: Vec<Uuid> = nodes.iter().map(|n| n.id).collect();
-    let edges = sqlx::query_as::<_, GraphEdge>(
-        "SELECT edge.src_id, edge.dst_id, edge.rel, edge.source_count
+    let edges = sqlx::query_as::<_, GraphEdge>(&format!(
+        "SELECT edge.src_id, edge.dst_id, edge.rel AS method,
+                ({strength})::float8 AS strength
          FROM entity_edges edge
          WHERE edge.src_id = ANY($1) AND edge.dst_id = ANY($1)
-         ORDER BY edge.source_count DESC, edge.src_id, edge.dst_id",
-    )
+         ORDER BY strength DESC, edge.src_id, edge.dst_id",
+        strength = crate::repos::entities::EDGE_STRENGTH_SQL,
+    ))
     .bind(&ids)
     .fetch_all(pool)
     .await

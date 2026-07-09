@@ -106,6 +106,14 @@ pub struct PipelineConfig {
     /// ingestion produces one synthesis, not many.
     #[serde(default = "default_synth_debounce_secs")]
     pub synth_debounce_secs: i64,
+    /// How many global nearest neighbours each entity is linked to by semantic
+    /// (context-similarity) correlation edges.
+    #[serde(default = "default_semantic_k")]
+    pub semantic_k: i64,
+    /// Floor cosine similarity for a semantic correlation edge (relative top-k
+    /// still does the ranking; this only drops near-orthogonal pairs).
+    #[serde(default = "default_semantic_min_sim")]
+    pub semantic_min_sim: f64,
 }
 
 fn default_embedder() -> String {
@@ -149,6 +157,12 @@ fn default_cluster_max_distance() -> f64 {
 }
 fn default_dirty_threshold() -> i32 {
     3
+}
+fn default_semantic_k() -> i64 {
+    6
+}
+fn default_semantic_min_sim() -> f64 {
+    0.3
 }
 fn default_synth_debounce_secs() -> i64 {
     30
@@ -200,6 +214,8 @@ impl Default for PipelineConfig {
             cluster_max_distance: default_cluster_max_distance(),
             cluster_dirty_threshold: default_dirty_threshold(),
             synth_debounce_secs: default_synth_debounce_secs(),
+            semantic_k: default_semantic_k(),
+            semantic_min_sim: default_semantic_min_sim(),
         }
     }
 }

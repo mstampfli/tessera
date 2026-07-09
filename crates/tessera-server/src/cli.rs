@@ -38,6 +38,9 @@ pub enum Command {
     Migrate,
     /// Print resolved config and check DB + CAS health.
     Doctor,
+    /// Backfill entity embeddings and rebuild all global semantic correlation
+    /// edges (run once after enabling correlation on an existing corpus).
+    Recorrelate,
     /// Manage API tokens.
     #[command(subcommand)]
     Token(TokenCmd),
@@ -154,6 +157,9 @@ pub async fn serve(config: Config) -> Result<()> {
     embeddings::ensure_hnsw_index(&db.api, space.id, space.dim)
         .await
         .map_err(|e| anyhow!(e.to_string()))?;
+    embeddings::ensure_entity_hnsw_index(&db.api, space.id, space.dim)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
     embeddings::set_active(&db.api, space.id)
         .await
         .map_err(|e| anyhow!(e.to_string()))?;
@@ -181,10 +187,13 @@ pub async fn serve(config: Config) -> Result<()> {
         plugins,
         llm: llm.clone(),
         space_id: space.id,
+        space_dim: space.dim,
         embed_batch: config.pipeline.embed_batch,
         cluster_max_distance: config.pipeline.cluster_max_distance,
         cluster_dirty_threshold: config.pipeline.cluster_dirty_threshold,
         synth_debounce_secs: config.pipeline.synth_debounce_secs,
+        semantic_k: config.pipeline.semantic_k,
+        semantic_min_sim: config.pipeline.semantic_min_sim,
     };
 
     // Install the Prometheus recorder (global) and keep its render handle.
@@ -286,6 +295,34 @@ pub async fn migrate(config: Config) -> Result<()> {
         .map_err(|e| anyhow!(e.to_string()))
         .context("applying migrations")?;
     println!("migrations applied");
+    Ok(())
+}
+
+/// Backfill entity embeddings and rebuild every global semantic correlation edge.
+/// Idempotent; run once after enabling correlation on an existing corpus.
+pub async fn recorrelate(config: Config) -> Result<()> {
+    let db = connect(&config).await?;
+    let space = embeddings::active(&db.api)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?
+        .ok_or_else(|| anyhow!("no active embedding space; run `serve` once first"))?;
+    embeddings::ensure_entity_hnsw_index(&db.api, space.id, space.dim)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
+
+    let embedded = tessera_db::repos::entities::recompute_all_entity_embeddings(&db.api, space.id)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
+    let edges = tessera_db::repos::entities::rebuild_similar_edges(
+        &db.api,
+        space.id,
+        space.dim,
+        config.pipeline.semantic_k,
+        config.pipeline.semantic_min_sim,
+    )
+    .await
+    .map_err(|e| anyhow!(e.to_string()))?;
+    println!("recorrelated: {embedded} entity embeddings, {edges} semantic edges");
     Ok(())
 }
 

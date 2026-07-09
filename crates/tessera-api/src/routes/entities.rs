@@ -13,11 +13,6 @@ use crate::auth::{AuthContext, Scope};
 use crate::error::ApiError;
 use crate::AppState;
 
-/// Each entity is linked to its `SEMANTIC_K` nearest peers by context similarity.
-pub(crate) const SEMANTIC_K: i64 = 4;
-/// Floor to drop near-orthogonal semantic pairs (relative top-k does the ranking).
-pub(crate) const SEMANTIC_MIN_SIM: f64 = 0.3;
-
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/entities", get(list))
@@ -82,9 +77,10 @@ struct NeighborView {
     kind: String,
     value: String,
     display_value: String,
-    rel: String,
-    source_count: i32,
-    score: f64,
+    /// `co_occurs` (direct) or `similar` (semantic).
+    method: String,
+    /// Correlation strength in `[0, 1]`.
+    strength: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -106,9 +102,8 @@ fn neighbor_view(n: entities::Neighbor) -> NeighborView {
         kind: n.kind,
         value: n.value,
         display_value: n.display_value,
-        rel: n.rel,
-        source_count: n.source_count,
-        score: n.score,
+        method: n.rel,
+        strength: n.strength,
     }
 }
 
@@ -171,17 +166,6 @@ struct GraphEdgeView {
     strength: f64,
 }
 
-impl From<tessera_db::repos::entities::CorrelationEdge> for GraphEdgeView {
-    fn from(e: tessera_db::repos::entities::CorrelationEdge) -> Self {
-        Self {
-            src_id: e.src_id,
-            dst_id: e.dst_id,
-            method: e.method.to_string(),
-            strength: e.strength,
-        }
-    }
-}
-
 #[derive(Debug, Serialize)]
 struct EntityGraph {
     nodes: Vec<GraphNodeView>,
@@ -191,8 +175,8 @@ struct EntityGraph {
     total: i64,
 }
 
-/// The global entity correlation graph (most-connected first, capped), with both
-/// direct co-occurrence and semantic-similarity edges.
+/// The global entity correlation graph (most-connected first, capped). Edges are
+/// the persisted correlations (direct co-occurrence and global semantic kNN).
 async fn graph(
     State(state): State<AppState>,
     ctx: AuthContext,
@@ -202,19 +186,8 @@ async fn graph(
     let kind = params.kind.as_deref().filter(|s| !s.is_empty());
     // Cap nodes so a large corpus renders as the top hubs, not a hairball.
     let cap = params.limit.unwrap_or(200).clamp(1, 1000);
-    let (nodes, cooccurrence) = entities::graph(&state.db.api, kind, cap).await?;
+    let (nodes, edges) = entities::graph(&state.db.api, kind, cap).await?;
     let total = entities::count(&state.db.api, kind).await?;
-
-    let ids: Vec<uuid::Uuid> = nodes.iter().map(|n| n.id).collect();
-    let semantic = entities::semantic_edges(
-        &state.db.api,
-        state.space.id,
-        &ids,
-        SEMANTIC_K,
-        SEMANTIC_MIN_SIM,
-    )
-    .await?;
-    let edges = entities::merge_correlation_edges(&cooccurrence, &semantic);
 
     Ok(Json(EntityGraph {
         nodes: nodes
@@ -227,7 +200,15 @@ async fn graph(
                 weight: n.weight,
             })
             .collect(),
-        edges: edges.into_iter().map(GraphEdgeView::from).collect(),
+        edges: edges
+            .into_iter()
+            .map(|e| GraphEdgeView {
+                src_id: e.src_id,
+                dst_id: e.dst_id,
+                method: e.method,
+                strength: e.strength,
+            })
+            .collect(),
         total,
     }))
 }

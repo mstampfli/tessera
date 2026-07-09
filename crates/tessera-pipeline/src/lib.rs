@@ -27,3 +27,6 @@ pub const KIND_EXTRACT_ENTITIES: &str = "extract_entities";
 pub const KIND_ASSIGN_CLUSTERS: &str = "assign_clusters";
 /// Job kind: synthesize (or re-synthesize) the insight for a dirty cluster.
 pub const KIND_SYNTHESIZE_INSIGHT: &str = "synthesize_insight";
+/// Job kind: materialize a document's entity embeddings and (re)compute their
+/// global semantic-similarity edges across the whole knowledge base.
+pub const KIND_CORRELATE_ENTITIES: &str = "correlate_entities";

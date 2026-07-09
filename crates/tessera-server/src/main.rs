@@ -23,6 +23,7 @@ async fn main() -> Result<()> {
         Command::McpStdio => cli::mcp_stdio(config).await,
         Command::Migrate => cli::migrate(config).await,
         Command::Doctor => cli::doctor(config).await,
+        Command::Recorrelate => cli::recorrelate(config).await,
         Command::Token(cmd) => cli::token(config, cmd).await,
         Command::User(cmd) => cli::user(config, cmd).await,
     }

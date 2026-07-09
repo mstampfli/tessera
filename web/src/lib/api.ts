@@ -156,9 +156,8 @@ export const Neighbor = z.object({
   kind: z.string(),
   value: z.string(),
   display_value: z.string(),
-  rel: z.string(),
-  source_count: z.number(),
-  score: z.number(),
+  method: z.string(),
+  strength: z.number(),
 });
 export type Neighbor = z.infer<typeof Neighbor>;
 

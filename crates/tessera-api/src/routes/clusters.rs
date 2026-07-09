@@ -128,19 +128,8 @@ async fn graph(
 ) -> Result<Json<ClusterGraph>, ApiError> {
     ctx.require(Scope::Read)?;
     // Cap nodes so the client graph stays renderable (plan: cluster graph only
-    // under ~500 nodes).
-    let (nodes, cooccurrence) = clusters::graph(&state.db.api, id, 300).await?;
-
-    let ids: Vec<Uuid> = nodes.iter().map(|n| n.id).collect();
-    let semantic = tessera_db::repos::entities::semantic_edges(
-        &state.db.api,
-        state.space.id,
-        &ids,
-        crate::routes::entities::SEMANTIC_K,
-        crate::routes::entities::SEMANTIC_MIN_SIM,
-    )
-    .await?;
-    let edges = tessera_db::repos::entities::merge_correlation_edges(&cooccurrence, &semantic);
+    // under ~500 nodes). Edges are the persisted correlations among the node set.
+    let (nodes, edges) = clusters::graph(&state.db.api, id, 300).await?;
 
     Ok(Json(ClusterGraph {
         nodes: nodes
@@ -158,7 +147,7 @@ async fn graph(
             .map(|e| GraphEdgeView {
                 src_id: e.src_id,
                 dst_id: e.dst_id,
-                method: e.method.to_string(),
+                method: e.method,
                 strength: e.strength,
             })
             .collect(),

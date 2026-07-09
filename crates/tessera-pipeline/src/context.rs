@@ -19,6 +19,8 @@ pub struct PipelineContext {
     pub llm: Arc<dyn LlmProvider>,
     /// The active embedding space id that new vectors are written into.
     pub space_id: i16,
+    /// The active space's dimension (for index-hitting halfvec casts).
+    pub space_dim: i32,
     /// Batch size for embedding jobs.
     pub embed_batch: usize,
     /// Max cosine distance for a chunk to join an existing cluster.
@@ -27,4 +29,8 @@ pub struct PipelineContext {
     pub cluster_dirty_threshold: i32,
     /// Debounce before synthesizing a dirty cluster.
     pub synth_debounce_secs: i64,
+    /// Global nearest neighbours linked per entity by semantic correlation.
+    pub semantic_k: i64,
+    /// Floor cosine similarity for a semantic correlation edge.
+    pub semantic_min_sim: f64,
 }
