@@ -320,6 +320,102 @@ pub async fn graph(
     Ok((nodes, edges))
 }
 
+/// All `(chunk_id, embedding)` pairs in a space, for a batch recluster.
+pub async fn chunk_embeddings_for_space(
+    pool: &PgPool,
+    space_id: i16,
+) -> Result<Vec<(Uuid, Vec<f32>)>> {
+    let rows = sqlx::query_as::<_, (Uuid, Vector)>(
+        "SELECT chunk_id, embedding FROM chunk_embeddings WHERE space_id = $1 ORDER BY chunk_id",
+    )
+    .bind(space_id)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+    Ok(rows.into_iter().map(|(id, v)| (id, v.to_vec())).collect())
+}
+
+/// Current membership per cluster in a space (for stable-id matching across a
+/// recluster and for detecting which clusters actually changed).
+pub async fn members_by_cluster(pool: &PgPool, space_id: i16) -> Result<Vec<(Uuid, Vec<Uuid>)>> {
+    let rows = sqlx::query_as::<_, (Uuid, Vec<Uuid>)>(
+        "SELECT c.id, array_agg(m.chunk_id) AS members
+         FROM clusters c
+         JOIN cluster_members m ON m.cluster_id = c.id
+         WHERE c.space_id = $1
+         GROUP BY c.id",
+    )
+    .bind(space_id)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+    Ok(rows)
+}
+
+/// Replace a space's clustering with `groups` (each an id-to-members mapping;
+/// the id is a reused existing cluster id or a fresh one). Rewrites members,
+/// recomputes each centroid as the mean of its members, drops clusters that no
+/// longer exist, and marks every resulting cluster dirty so synthesis re-checks
+/// it (the input-hash dedup skips the unchanged ones). One transaction.
+pub async fn apply_reclustering(
+    pool: &PgPool,
+    space_id: i16,
+    groups: &[(Uuid, Vec<Uuid>)],
+) -> Result<()> {
+    let mut tx = pool.begin().await.map_err(map_sqlx)?;
+
+    // Clear this space's membership and remove clusters not in the new set.
+    sqlx::query(
+        "DELETE FROM cluster_members
+         WHERE cluster_id IN (SELECT id FROM clusters WHERE space_id = $1)",
+    )
+    .bind(space_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx)?;
+    let keep: Vec<Uuid> = groups.iter().map(|(id, _)| *id).collect();
+    sqlx::query("DELETE FROM clusters WHERE space_id = $1 AND id <> ALL($2)")
+        .bind(space_id)
+        .bind(&keep)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx)?;
+
+    for (id, members) in groups {
+        // Upsert the cluster with centroid = mean of its members (works for a
+        // fresh id via INSERT and a reused id via ON CONFLICT).
+        sqlx::query(
+            "INSERT INTO clusters (id, space_id, centroid, size, dirty_count)
+             SELECT $1, $2, avg(e.embedding), count(*)::int, 1
+             FROM chunk_embeddings e
+             WHERE e.chunk_id = ANY($3) AND e.space_id = $2
+             ON CONFLICT (id) DO UPDATE
+               SET centroid = EXCLUDED.centroid, size = EXCLUDED.size,
+                   dirty_count = 1, updated_at = now()",
+        )
+        .bind(id)
+        .bind(space_id)
+        .bind(members)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx)?;
+
+        sqlx::query(
+            "INSERT INTO cluster_members (cluster_id, chunk_id, similarity)
+             SELECT $1, unnest($2::uuid[]), 1.0
+             ON CONFLICT (chunk_id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(members)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx)?;
+    }
+
+    tx.commit().await.map_err(map_sqlx)?;
+    Ok(())
+}
+
 /// The top entities mentioned across a cluster's chunks (for synthesis context
 /// and labeling), by mention frequency within the cluster.
 pub async fn top_entities(

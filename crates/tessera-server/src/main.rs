@@ -24,6 +24,7 @@ async fn main() -> Result<()> {
         Command::Migrate => cli::migrate(config).await,
         Command::Doctor => cli::doctor(config).await,
         Command::Recorrelate => cli::recorrelate(config).await,
+        Command::Recluster => cli::recluster(config).await,
         Command::Token(cmd) => cli::token(config, cmd).await,
         Command::User(cmd) => cli::user(config, cmd).await,
     }

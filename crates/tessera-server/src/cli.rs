@@ -41,6 +41,9 @@ pub enum Command {
     /// Backfill entity embeddings and rebuild all global semantic correlation
     /// edges (run once after enabling correlation on an existing corpus).
     Recorrelate,
+    /// Recluster all chunk embeddings with HDBSCAN (density-based; resists the
+    /// mega-cluster that centroid drift produces on tightly-packed embeddings).
+    Recluster,
     /// Manage API tokens.
     #[command(subcommand)]
     Token(TokenCmd),
@@ -299,6 +302,29 @@ pub async fn migrate(config: Config) -> Result<()> {
         .map_err(|e| anyhow!(e.to_string()))
         .context("applying migrations")?;
     println!("migrations applied");
+    Ok(())
+}
+
+/// Recluster all chunk embeddings with HDBSCAN. Enqueues synthesis (picked up by
+/// a running server's workers) for clusters whose membership changed.
+pub async fn recluster(config: Config) -> Result<()> {
+    let db = connect(&config).await?;
+    let space = embeddings::active(&db.api)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?
+        .ok_or_else(|| anyhow!("no active embedding space; run `serve` once first"))?;
+    let r = tessera_pipeline::recluster::run(
+        &db,
+        space.id,
+        config.pipeline.cluster_min_size,
+        config.pipeline.synth_debounce_secs,
+    )
+    .await
+    .map_err(|e| anyhow!(e.to_string()))?;
+    println!(
+        "reclustered: {} clusters, {} noise chunks, {} changed",
+        r.clusters, r.noise, r.changed
+    );
     Ok(())
 }
 

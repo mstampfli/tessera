@@ -124,6 +124,9 @@ pub struct PipelineConfig {
     /// allowed to merge communities (0 disables the guard).
     #[serde(default = "default_community_hub_degree")]
     pub community_hub_degree: i64,
+    /// Minimum cluster size for HDBSCAN reclustering.
+    #[serde(default = "default_cluster_min_size")]
+    pub cluster_min_size: usize,
 }
 
 fn default_embedder() -> String {
@@ -183,6 +186,9 @@ fn default_temporal_tau_days() -> f64 {
 fn default_community_hub_degree() -> i64 {
     25
 }
+fn default_cluster_min_size() -> usize {
+    2
+}
 fn default_synth_debounce_secs() -> i64 {
     30
 }
@@ -238,6 +244,7 @@ impl Default for PipelineConfig {
             temporal_window_days: default_temporal_window_days(),
             temporal_tau_days: default_temporal_tau_days(),
             community_hub_degree: default_community_hub_degree(),
+            cluster_min_size: default_cluster_min_size(),
         }
     }
 }

@@ -7,6 +7,7 @@
 
 mod context;
 pub mod ingest;
+pub mod recluster;
 mod stages;
 mod synth;
 mod worker;
