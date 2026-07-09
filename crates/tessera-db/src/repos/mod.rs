@@ -2,6 +2,7 @@
 //! domain rows; handlers and workers never write ad-hoc SQL at call sites.
 
 pub mod api_tokens;
+pub mod ask_history;
 pub mod audit;
 pub mod chunks;
 pub mod clusters;

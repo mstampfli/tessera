@@ -4,11 +4,12 @@
 //! later enhancement; the citation correctness is the load-bearing part and is
 //! fully in place here.
 
-use axum::extract::State;
-use axum::routing::post;
+use axum::extract::{Query, State};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use tessera_core::error::{Error, ErrorKind};
+use tessera_db::repos::ask_history;
 use tessera_search::AskAnswer;
 
 use crate::auth::{AuthContext, Scope};
@@ -16,7 +17,9 @@ use crate::error::ApiError;
 use crate::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/ask", post(ask))
+    Router::new()
+        .route("/ask", post(ask))
+        .route("/ask/history", get(history))
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,5 +52,40 @@ async fn ask(
         k,
     )
     .await?;
+
+    // Log the question and answer (best-effort; never fail the ask over history).
+    if let Ok(value) = serde_json::to_value(&answer) {
+        let _ =
+            ask_history::record(&state.db.api, Some(&ctx.audit_id()), &req.question, &value).await;
+    }
     Ok(Json(answer))
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoryParams {
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+/// Recent ask questions and their stored answers, newest first.
+async fn history(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Query(params): Query<HistoryParams>,
+) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
+    ctx.require(Scope::Read)?;
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let rows = ask_history::list(&state.db.api, limit).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id,
+                    "question": r.question,
+                    "answer": r.answer,
+                    "created_at": r.created_at,
+                })
+            })
+            .collect(),
+    ))
 }

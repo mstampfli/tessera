@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { api, type AskAnswer, type SearchHit } from "@/lib/api";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { api, type AskAnswer, type AskHistoryEntry, type SearchHit } from "@/lib/api";
 
 type Mode = "hybrid" | "semantic" | "keyword" | "ask";
 const MODES: Mode[] = ["hybrid", "semantic", "keyword", "ask"];
@@ -15,8 +15,14 @@ export default function SearchPage() {
   const searchMut = useMutation({
     mutationFn: (q: string) => api.search(q, mode, 25),
   });
+  const historyQ = useQuery({
+    queryKey: ["ask-history"],
+    queryFn: () => api.askHistory(50),
+    enabled: mode === "ask",
+  });
   const askMut = useMutation({
     mutationFn: (q: string) => api.ask(q, 8),
+    onSuccess: () => historyQ.refetch(),
   });
 
   const run = (e: React.FormEvent) => {
@@ -69,10 +75,47 @@ export default function SearchPage() {
       </form>
 
       {mode === "ask" ? (
-        <AskResult data={askMut.data} error={askMut.error?.message} />
+        <>
+          <AskResult data={askMut.data} error={askMut.error?.message} />
+          <AskHistory entries={historyQ.data} />
+        </>
       ) : (
         <SearchResults hits={searchMut.data?.hits} error={searchMut.error?.message} />
       )}
+    </div>
+  );
+}
+
+function AskHistory({ entries }: { entries?: AskHistoryEntry[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (!entries || entries.length === 0) return null;
+  return (
+    <div>
+      <span className="mk-kicker">history</span>
+      <ul className="mt-2 divide-y" style={{ borderColor: "var(--mk-border)" }}>
+        {entries.map((e) => (
+          <li key={e.id} className="py-2">
+            <button
+              className="flex w-full items-baseline gap-2 text-left"
+              onClick={() => setOpen(open === e.id ? null : e.id)}
+              aria-expanded={open === e.id}
+            >
+              <span style={{ color: "var(--mk-text-3)" }}>{open === e.id ? "▾" : "▸"}</span>
+              <span className="text-sm" style={{ color: "var(--mk-text-1)" }}>
+                {e.question}
+              </span>
+              <span className="ml-auto shrink-0 font-mono text-[11px]" style={{ color: "var(--mk-text-3)" }}>
+                {e.created_at.slice(0, 10)}
+              </span>
+            </button>
+            {open === e.id && (
+              <div className="mt-2">
+                <AskAnswerView data={e.answer} />
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -117,7 +160,10 @@ function SearchResults({ hits, error }: { hits?: SearchHit[]; error?: string }) 
 function AskResult({ data, error }: { data?: AskAnswer; error?: string }) {
   if (error) return <ErrorLine text={error} />;
   if (!data) return null;
+  return <AskAnswerView data={data} />;
+}
 
+function AskAnswerView({ data }: { data: AskAnswer }) {
   return (
     <div className="space-y-4">
       <div className="mk-card p-4">

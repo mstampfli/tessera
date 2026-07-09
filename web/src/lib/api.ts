@@ -86,6 +86,14 @@ export const AskAnswer = z.object({
 });
 export type AskAnswer = z.infer<typeof AskAnswer>;
 
+export const AskHistoryEntry = z.object({
+  id: z.string(),
+  question: z.string(),
+  answer: AskAnswer,
+  created_at: z.string(),
+});
+export type AskHistoryEntry = z.infer<typeof AskHistoryEntry>;
+
 export const IngestResult = z.object({
   document_id: z.string(),
   deduped: z.boolean(),
@@ -301,6 +309,8 @@ export const api = {
     ),
   ask: (question: string, k = 8) =>
     request("/v1/ask", AskAnswer, { method: "POST", body: JSON.stringify({ question, k }) }),
+  askHistory: (limit = 50) =>
+    request(`/v1/ask/history?limit=${limit}`, z.array(AskHistoryEntry)),
 
   ingest: (item: {
     content?: string;
