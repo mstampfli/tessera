@@ -97,6 +97,7 @@ export function CorrelationGraph({
       const nodeColor = token("--mk-text-2", "#c7b299");
       const edgeColor = token("--mk-border-strong", "#5a4023");
       const semanticColor = token("--mk-clay-1", "#3c2a19");
+      const temporalColor = token("--mk-green-1", "#8fa05a");
       const bridgeColor = token("--mk-highlight", "#eda43d");
       const dimColor = token("--mk-text-3", "#8d7456");
       const labelColor = token("--mk-text-1", "#f4ead9");
@@ -141,12 +142,20 @@ export function CorrelationGraph({
         // between things never stated together): draw it highlighted. Other
         // semantic edges are quieter than direct co-occurrence.
         const semantic = e.method === "similar";
+        const temporal = e.method === "temporal";
         const ca = communityOf.get(e.source);
         const cb = communityOf.get(e.target);
         const bridge = semantic && ca != null && cb != null && ca !== cb;
+        const color = bridge
+          ? bridgeColor
+          : temporal
+            ? temporalColor
+            : semantic
+              ? semanticColor
+              : edgeColor;
         graph.addEdge(e.source, e.target, {
           size: (bridge ? 1.0 : 0.5) + (e.weight / maxEdgeW) * 3.5,
-          color: bridge ? bridgeColor : semantic ? semanticColor : edgeColor,
+          color,
         });
       });
 

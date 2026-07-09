@@ -114,6 +114,12 @@ pub struct PipelineConfig {
     /// still does the ranking; this only drops near-orthogonal pairs).
     #[serde(default = "default_semantic_min_sim")]
     pub semantic_min_sim: f64,
+    /// Max separation, in days, for a temporal correlation edge.
+    #[serde(default = "default_temporal_window_days")]
+    pub temporal_window_days: f64,
+    /// Decay constant, in days, for temporal edge strength (exp(-delta/tau)).
+    #[serde(default = "default_temporal_tau_days")]
+    pub temporal_tau_days: f64,
 }
 
 fn default_embedder() -> String {
@@ -163,6 +169,12 @@ fn default_semantic_k() -> i64 {
 }
 fn default_semantic_min_sim() -> f64 {
     0.3
+}
+fn default_temporal_window_days() -> f64 {
+    14.0
+}
+fn default_temporal_tau_days() -> f64 {
+    7.0
 }
 fn default_synth_debounce_secs() -> i64 {
     30
@@ -216,6 +228,8 @@ impl Default for PipelineConfig {
             synth_debounce_secs: default_synth_debounce_secs(),
             semantic_k: default_semantic_k(),
             semantic_min_sim: default_semantic_min_sim(),
+            temporal_window_days: default_temporal_window_days(),
+            temporal_tau_days: default_temporal_tau_days(),
         }
     }
 }

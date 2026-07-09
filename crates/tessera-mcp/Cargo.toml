@@ -10,6 +10,7 @@ description = "MCP server exposing tessera to AI agents (ingest, search, ask, in
 
 [dependencies]
 tessera-core.workspace = true
+chrono.workspace = true
 tessera-db.workspace = true
 tessera-search.workspace = true
 tessera-providers.workspace = true

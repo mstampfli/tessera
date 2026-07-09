@@ -198,6 +198,77 @@ pub async fn add_similar_edges(
     Ok(written)
 }
 
+/// The relation name for a temporal-proximity edge.
+pub const REL_TEMPORAL: &str = "temporal";
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct TemporalNeighbor {
+    id: Uuid,
+    delta_secs: f64,
+}
+
+/// Add `temporal` edges out of one entity: link it to entities whose events fall
+/// within `window_secs` of any of its own event times, weighted by proximity
+/// (exponential decay with `tau_secs`), so things that happened around the same
+/// time correlate even when they never co-occur. Requires document `event_time`;
+/// entities with no dated documents produce nothing. Add-only, like similar edges.
+pub async fn add_temporal_edges(
+    pool: &PgPool,
+    entity_id: Uuid,
+    window_secs: f64,
+    tau_secs: f64,
+    k: i64,
+) -> Result<u64> {
+    let neighbors = sqlx::query_as::<_, TemporalNeighbor>(
+        "WITH my_times AS (
+             SELECT DISTINCT d.event_time AS t
+             FROM entity_mentions m
+             JOIN documents d ON d.id = m.document_id
+             WHERE m.entity_id = $1 AND d.event_time IS NOT NULL
+         )
+         SELECT m2.entity_id AS id,
+                MIN(ABS(EXTRACT(EPOCH FROM (d2.event_time - mt.t))))::float8 AS delta_secs
+         FROM entity_mentions m2
+         JOIN documents d2 ON d2.id = m2.document_id AND d2.event_time IS NOT NULL
+         CROSS JOIN my_times mt
+         WHERE m2.entity_id <> $1
+           AND ABS(EXTRACT(EPOCH FROM (d2.event_time - mt.t))) <= $2
+         GROUP BY m2.entity_id
+         ORDER BY delta_secs
+         LIMIT $3",
+    )
+    .bind(entity_id)
+    .bind(window_secs)
+    .bind(k)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+
+    let mut written = 0u64;
+    for n in neighbors {
+        let strength = (-n.delta_secs / tau_secs).exp().clamp(0.0, 1.0);
+        let (a, b) = if entity_id <= n.id {
+            (entity_id, n.id)
+        } else {
+            (n.id, entity_id)
+        };
+        written += sqlx::query(
+            "INSERT INTO entity_edges (src_id, dst_id, rel, source_count, weight, first_seen, last_seen)
+             VALUES ($1, $2, 'temporal', 0, $3, now(), now())
+             ON CONFLICT (src_id, dst_id, rel)
+             DO UPDATE SET weight = EXCLUDED.weight, last_seen = now()",
+        )
+        .bind(a)
+        .bind(b)
+        .bind(strength)
+        .execute(pool)
+        .await
+        .map_err(map_sqlx)?
+        .rows_affected();
+    }
+    Ok(written)
+}
+
 /// Rebuild every `similar` edge from scratch: drop all of them, then recompute
 /// each embedded entity's top-k. Used to backfill an existing corpus and as a
 /// periodic maintenance pass that prunes edges made stale by embedding drift.
@@ -216,6 +287,34 @@ pub async fn rebuild_similar_edges(
     let mut total = 0u64;
     for id in ids {
         total += add_similar_edges(pool, space_id, dim, id, k, min_sim).await?;
+    }
+    Ok(total)
+}
+
+/// Rebuild every `temporal` edge from scratch across all entities. Used by the
+/// backfill CLI and as maintenance.
+pub async fn rebuild_temporal_edges(
+    pool: &PgPool,
+    window_secs: f64,
+    tau_secs: f64,
+    k: i64,
+) -> Result<u64> {
+    sqlx::query("DELETE FROM entity_edges WHERE rel = 'temporal'")
+        .execute(pool)
+        .await
+        .map_err(map_sqlx)?;
+    // Only entities that appear in a dated document can have temporal edges.
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT m.entity_id
+         FROM entity_mentions m JOIN documents d ON d.id = m.document_id
+         WHERE d.event_time IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
+    let mut total = 0u64;
+    for id in ids {
+        total += add_temporal_edges(pool, id, window_secs, tau_secs, k).await?;
     }
     Ok(total)
 }

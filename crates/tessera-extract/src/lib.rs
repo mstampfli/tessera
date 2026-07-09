@@ -6,6 +6,7 @@
 //! as hostile: bounded work, lossy UTF-8 decoding, and no execution of content.
 
 pub mod chunk;
+pub mod dates;
 pub mod extractors;
 pub mod plugin;
 pub mod security;

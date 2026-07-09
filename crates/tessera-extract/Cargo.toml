@@ -12,6 +12,7 @@ description = "Content sniffing, chunking, built-in extractors, the security ent
 tessera-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+chrono.workspace = true
 thiserror.workspace = true
 text-splitter = { version = "0.32.0", features = ["markdown"] }
 pulldown-cmark = "0.13.4"

@@ -194,6 +194,8 @@ pub async fn serve(config: Config) -> Result<()> {
         synth_debounce_secs: config.pipeline.synth_debounce_secs,
         semantic_k: config.pipeline.semantic_k,
         semantic_min_sim: config.pipeline.semantic_min_sim,
+        temporal_window_days: config.pipeline.temporal_window_days,
+        temporal_tau_days: config.pipeline.temporal_tau_days,
     };
 
     // Install the Prometheus recorder (global) and keep its render handle.
@@ -322,11 +324,20 @@ pub async fn recorrelate(config: Config) -> Result<()> {
     )
     .await
     .map_err(|e| anyhow!(e.to_string()))?;
+    let day = 86_400.0;
+    let temporal = tessera_db::repos::entities::rebuild_temporal_edges(
+        &db.api,
+        config.pipeline.temporal_window_days * day,
+        config.pipeline.temporal_tau_days * day,
+        config.pipeline.semantic_k,
+    )
+    .await
+    .map_err(|e| anyhow!(e.to_string()))?;
     let communities = tessera_db::repos::communities::detect(&db.api)
         .await
         .map_err(|e| anyhow!(e.to_string()))?;
     println!(
-        "recorrelated: {embedded} entity embeddings, {edges} semantic edges, {communities} communities"
+        "recorrelated: {embedded} entity embeddings, {edges} semantic edges, {temporal} temporal edges, {communities} communities"
     );
     Ok(())
 }

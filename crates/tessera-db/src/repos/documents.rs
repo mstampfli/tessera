@@ -42,6 +42,8 @@ pub struct NewDocument<'a> {
     pub title: Option<&'a str>,
     pub uri: Option<&'a str>,
     pub meta: &'a Value,
+    /// When the event happened (caller-provided); auto-extracted later if absent.
+    pub event_time: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Insert a pending document, deduping on content hash. Returns the row and
@@ -67,8 +69,8 @@ pub async fn create_pending_tx(
     // Try to insert; on hash conflict, do nothing and fetch the existing row.
     let inserted = sqlx::query_as::<_, Document>(
         "INSERT INTO documents
-            (id, source_id, content_hash, media_type, size_bytes, title, uri, meta)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            (id, source_id, content_hash, media_type, size_bytes, title, uri, meta, event_time)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (content_hash) DO NOTHING
          RETURNING id, source_id, content_hash, media_type, size_bytes, title, uri, meta,
                    status, error, created_at, processed_at",
@@ -81,6 +83,7 @@ pub async fn create_pending_tx(
     .bind(doc.title)
     .bind(doc.uri)
     .bind(doc.meta)
+    .bind(doc.event_time)
     .fetch_optional(&mut **tx)
     .await
     .map_err(map_sqlx)?;
@@ -150,6 +153,22 @@ pub async fn set_title_if_absent(pool: &PgPool, id: Uuid, title: &str) -> Result
     sqlx::query("UPDATE documents SET title = $2 WHERE id = $1 AND title IS NULL")
         .bind(id)
         .bind(title)
+        .execute(pool)
+        .await
+        .map_err(map_sqlx)?;
+    Ok(())
+}
+
+/// Set the event time only if the caller did not already supply one (so an
+/// auto-extracted date never overrides an explicit ingest value). Idempotent.
+pub async fn set_event_time_if_absent(
+    pool: &PgPool,
+    id: Uuid,
+    event_time: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    sqlx::query("UPDATE documents SET event_time = $2 WHERE id = $1 AND event_time IS NULL")
+        .bind(id)
+        .bind(event_time)
         .execute(pool)
         .await
         .map_err(map_sqlx)?;

@@ -10,6 +10,7 @@ description = "Incremental pipeline workers: normalize, chunk, embed, extract, c
 
 [dependencies]
 tessera-core.workspace = true
+chrono.workspace = true
 tessera-db.workspace = true
 tessera-extract.workspace = true
 tessera-providers.workspace = true

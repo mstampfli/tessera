@@ -27,6 +27,9 @@ pub struct IngestBytes<'a> {
     pub title: Option<&'a str>,
     pub uri: Option<&'a str>,
     pub meta: Value,
+    /// When the event happened (caller-provided); auto-extracted from content
+    /// during processing if absent.
+    pub event_time: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Store bytes in the content store (deduped by hash), record the document, and
@@ -51,6 +54,7 @@ pub async fn ingest_bytes(db: &Db, cas: &CasStore, item: IngestBytes<'_>) -> Res
             title: item.title,
             uri: item.uri,
             meta: &item.meta,
+            event_time: item.event_time,
         },
     )
     .await?;

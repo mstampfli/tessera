@@ -56,6 +56,10 @@ struct IngestItem {
     uri: Option<String>,
     #[serde(default)]
     meta: Option<Value>,
+    /// When the event happened (RFC 3339, e.g. `2026-03-14T00:00:00Z`). Optional;
+    /// auto-extracted from content if omitted. Drives temporal correlation.
+    #[serde(default)]
+    event_time: Option<String>,
 }
 
 impl IngestItem {
@@ -144,6 +148,19 @@ async fn ingest_one(
 ) -> Result<IngestResult, ApiError> {
     let bytes = item.decode_bytes()?;
     let meta = item.meta.clone().unwrap_or_else(|| json!({}));
+    let event_time = match &item.event_time {
+        Some(s) => Some(
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map_err(|_| {
+                    ApiError(Error::new(
+                        ErrorKind::Invalid,
+                        "event_time must be RFC 3339",
+                    ))
+                })?
+                .with_timezone(&chrono::Utc),
+        ),
+        None => None,
+    };
 
     let ingested = tessera_pipeline::ingest_bytes(
         &state.db,
@@ -155,6 +172,7 @@ async fn ingest_one(
             title: item.title.as_deref(),
             uri: item.uri.as_deref(),
             meta,
+            event_time,
         },
     )
     .await
@@ -296,6 +314,7 @@ async fn ingest_upload(
             title: filename.clone(),
             uri: None,
             meta: Some(json!({ "filename": filename })),
+            event_time: None,
         };
         match ingest_one(&state, source_id, &item).await {
             Ok(r) => {
@@ -361,6 +380,7 @@ async fn ingest_url(
         title: Some(fetched.final_url.clone()),
         uri: Some(fetched.final_url),
         meta: Some(json!({ "fetched_from": req.url })),
+        event_time: None,
     };
     let result = ingest_one(&state, source_id, &item).await?;
 

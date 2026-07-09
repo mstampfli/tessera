@@ -15,6 +15,9 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use tessera_core::error::{Error, ErrorKind};
 
+/// Re-exported so downstream crates can name a pool without depending on sqlx.
+pub use sqlx::PgPool as Pool;
+
 /// Map any sqlx error into the workspace error taxonomy, classifying a unique
 /// violation as a conflict so callers and the API layer can react correctly.
 pub fn map_sqlx(e: sqlx::Error) -> Error {

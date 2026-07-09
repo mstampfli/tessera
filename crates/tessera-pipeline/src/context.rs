@@ -33,4 +33,8 @@ pub struct PipelineContext {
     pub semantic_k: i64,
     /// Floor cosine similarity for a semantic correlation edge.
     pub semantic_min_sim: f64,
+    /// Max separation (days) for a temporal correlation edge.
+    pub temporal_window_days: f64,
+    /// Decay constant (days) for temporal edge strength.
+    pub temporal_tau_days: f64,
 }

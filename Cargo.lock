@@ -4208,6 +4208,7 @@ dependencies = [
 name = "tessera-extract"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "csv",
  "infer",
  "libc",
@@ -4231,6 +4232,7 @@ name = "tessera-mcp"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "serde",
  "serde_json",
  "tessera-core",
@@ -4247,6 +4249,7 @@ dependencies = [
 name = "tessera-pipeline"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "metrics",
  "serde",
  "serde_json",

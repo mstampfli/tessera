@@ -118,6 +118,11 @@ pub async fn call(state: &McpState, name: &str, args: &Value) -> Result<String, 
                     title: args.get("title").and_then(Value::as_str),
                     uri: None,
                     meta: json!({ "via": "mcp" }),
+                    event_time: args
+                        .get("event_time")
+                        .and_then(Value::as_str)
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| dt.with_timezone(&chrono::Utc)),
                 },
             )
             .await

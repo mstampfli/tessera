@@ -67,6 +67,9 @@ async fn correlate_entities(ctx: &PipelineContext, payload: &Value) -> Result<()
     // then link it to its global nearest neighbours. Add-only per entity; a
     // full rebuild (the backfill CLI) prunes edges made stale by embedding drift.
     entities::recompute_entity_embeddings(pool, ctx.space_id, &ids).await?;
+    let day = 86_400.0;
+    let window = ctx.temporal_window_days * day;
+    let tau = ctx.temporal_tau_days * day;
     let mut linked = 0u64;
     for id in &ids {
         linked += entities::add_similar_edges(
@@ -78,6 +81,8 @@ async fn correlate_entities(ctx: &PipelineContext, payload: &Value) -> Result<()
             ctx.semantic_min_sim,
         )
         .await?;
+        // Temporal edges (no-op unless documents carry event_time).
+        linked += entities::add_temporal_edges(pool, *id, window, tau, ctx.semantic_k).await?;
     }
 
     // Communities depend on the co-occurrence graph, which extraction already
@@ -99,6 +104,27 @@ async fn correlate_entities(ctx: &PipelineContext, payload: &Value) -> Result<()
         &json!({ "type": "entities.correlated", "document_id": document_id, "edges": linked }),
     )
     .await;
+    Ok(())
+}
+
+/// If the caller did not supply an event time, read the earliest date from the
+/// document's leading text (bounded) and set it, so temporal correlation has an
+/// axis. A no-op when the content carries no date.
+async fn auto_event_time(
+    pool: &tessera_db::Pool,
+    document_id: Uuid,
+    prepared: &tessera_extract::Prepared,
+) -> Result<()> {
+    let sample: String = prepared
+        .chunks
+        .iter()
+        .map(|c| c.text.as_str())
+        .take(8)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if let Some(event_time) = tessera_extract::dates::extract_earliest(&sample) {
+        documents::set_event_time_if_absent(pool, document_id, event_time).await?;
+    }
     Ok(())
 }
 
@@ -155,6 +181,7 @@ async fn process_document(ctx: &PipelineContext, payload: &Value) -> Result<()> 
     if let Some(title) = &prepared.title {
         documents::set_title_if_absent(pool, document_id, title).await?;
     }
+    auto_event_time(pool, document_id, &prepared).await?;
 
     let inputs: Vec<chunks::ChunkInput> = prepared
         .chunks
