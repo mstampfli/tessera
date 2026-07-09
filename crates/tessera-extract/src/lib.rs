@@ -11,10 +11,12 @@ pub mod extractors;
 pub mod plugin;
 pub mod security;
 pub mod sniff;
+pub mod text;
 
 pub use chunk::PreparedChunk;
 pub use extractors::{normalize, Prepared};
 pub use sniff::sniff;
+pub use text::clean_text;
 
 use tessera_core::ExtractEvent;
 

@@ -7,7 +7,7 @@
 
 use pgvector::Vector;
 use sqlx::PgPool;
-use tessera_core::error::Result;
+use tessera_core::error::{Error, ErrorKind, Result};
 use uuid::Uuid;
 
 use crate::map_sqlx;
@@ -111,12 +111,37 @@ pub async fn ensure_entity_hnsw_index(pool: &PgPool, space_id: i16, dim: i32) ->
     Ok(())
 }
 
+/// Reject any vector whose length does not match the space dimension, before it
+/// reaches the write. A wrong-dimension vector would otherwise be stored and only
+/// fail later, cryptically, at the `halfvec(dim)` cast in the index or a query.
+fn check_dims(rows: &[(Uuid, Vec<f32>)], expected_dim: i32) -> Result<()> {
+    let dim = usize::try_from(expected_dim).unwrap_or(0);
+    for (chunk_id, vec) in rows {
+        if vec.len() != dim {
+            return Err(Error::new(
+                ErrorKind::Invalid,
+                format!(
+                    "embedding for chunk {chunk_id} has dimension {} but the space dimension is {dim}",
+                    vec.len()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Insert a batch of `(chunk_id, embedding)` pairs for a space. Idempotent on
-/// `(chunk_id, space_id)`.
-pub async fn insert_batch(pool: &PgPool, space_id: i16, rows: &[(Uuid, Vec<f32>)]) -> Result<u64> {
+/// `(chunk_id, space_id)`. Rejects any vector whose length is not `expected_dim`.
+pub async fn insert_batch(
+    pool: &PgPool,
+    space_id: i16,
+    expected_dim: i32,
+    rows: &[(Uuid, Vec<f32>)],
+) -> Result<u64> {
     if rows.is_empty() {
         return Ok(0);
     }
+    check_dims(rows, expected_dim)?;
     let mut tx = pool.begin().await.map_err(map_sqlx)?;
     let mut inserted = 0u64;
     for (chunk_id, vec) in rows {
@@ -158,4 +183,23 @@ pub async fn get_vector(pool: &PgPool, chunk_id: Uuid, space_id: i16) -> Result<
     .await
     .map_err(map_sqlx)?;
     Ok(row.map(|v| v.to_vec()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_dims;
+    use uuid::Uuid;
+
+    #[test]
+    fn dim_check_rejects_wrong_length() {
+        let id = Uuid::nil();
+        assert!(check_dims(&[(id, vec![0.0; 4])], 4).is_ok());
+        assert!(check_dims(&[], 4).is_ok());
+        let err = check_dims(&[(id, vec![0.0; 3])], 4).unwrap_err();
+        assert!(
+            err.message().contains("dimension"),
+            "got: {}",
+            err.message()
+        );
+    }
 }

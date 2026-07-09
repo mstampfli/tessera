@@ -98,6 +98,15 @@ registrable domain via the public-suffix list, an uppercased CVE, a
 colon-delimited lowercased MAC) that the storage layer dedups on.
 Instead of: canonicalizing an entity value at each call site, which drifts.
 
+### `clean_text` (`text.rs`)
+Strips control characters from decoded content, keeping only tab and newline, so
+the store, the full-text `tsvector`, and the embeddings stay free of control
+noise and a stray NUL (which a Postgres `text` value cannot even hold) never
+fails the chunk insert. Applied at `PreparedChunk::new`, the single constructor
+every chunk flows through, so every chunk is clean by construction.
+Instead of: trusting `from_utf8_lossy` output as clean, or hitting the NUL at the
+failing INSERT.
+
 ## SSRF-guarded fetch (tessera-api, `url_guard.rs`)
 
 ### `url_guard::fetch(url)` -> `Fetched`
@@ -148,25 +157,25 @@ unrepresentable:
 - Per-space vector dimensionality recorded in `embedding_spaces` and applied via
   the `halfvec(dim)` cast in the index and in every query, so storage and search
   share one dimension; a model swap registers a new space rather than mutating
-  the column.
+  the column. The write path enforces it too: `embeddings::insert_batch` rejects
+  any vector whose length is not the space dimension, so a mismatch fails at the
+  write with a clear error instead of cryptically later at the cast.
 
-## Known gaps vs the plan (findings, to be reconciled)
+## Reconciliation with the plan
 
-Writing this catalog was an audit. The design plan called for these as named,
-tested primitives; the current code inlines or skips them. Recorded here so they
-are not mistaken for done, and tracked for a follow-up pass:
+The audit that produced this catalog found three primitives the design plan
+called for that the code had inlined or skipped. All three are now built:
 
-1. **No `clean_text` or bounded-reader primitives, and no write-side dim check.**
-   Text cleaning is inline `from_utf8_lossy`, bounding is ad-hoc `.take(N)`, and
-   `embeddings::insert_batch` accepts vectors without checking their length
-   against `space.dim` (a wrong-dimension vector fails later at index or query
-   time, not at the write).
+- `generate_json<T>` (LLM JSON, above): a lean typed-parse-plus-retry over the
+  caller's own prompt, rather than the plan's schema-in-prompt design, because a
+  hand-tuned domain prompt guides a small local model better than a rendered
+  schema would.
+- Streaming ingestion: `CasStore::write_streaming` plus `ingest_stream` stream an
+  upload into the store without buffering it.
+- `clean_text` and the write-side dim check (above).
 
-(Two of the plan's gaps are now closed. The shared `generate_json<T>` LLM-JSON
-helper is built as a lean typed-parse-plus-retry primitive over the caller's own
-prompt, rather than the plan's schema-in-prompt design, because a hand-tuned
-domain prompt guides a small local model better than a rendered JSON schema
-would. Streaming ingestion is built: `CasStore::write_streaming` plus
-`ingest_stream` stream an upload into the store without buffering it, and the
-bounded read of untrusted input is the cap enforced there. See the sections
-above.)
+The one plan item that stayed a convention rather than a wrapper type is the
+bounded reader: the real bound on untrusted ingest input is the size cap in
+`write_streaming`, and elsewhere `.take(N)` on iterators is already
+safe-by-construction, so a standalone `BoundedReader` with no distinct call site
+was not worth inventing.

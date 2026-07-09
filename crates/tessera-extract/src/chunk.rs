@@ -18,10 +18,12 @@ pub struct PreparedChunk {
 }
 
 impl PreparedChunk {
-    /// Build a chunk, computing an approximate token count.
+    /// Build a chunk, cleaning control characters out of the text (every chunk in
+    /// the system is constructed here, so this is where cleanliness is enforced)
+    /// and computing an approximate token count.
     #[must_use]
     pub fn new(text: impl Into<String>) -> Self {
-        let text = text.into();
+        let text = crate::text::clean_text(&text.into());
         let token_count = approx_tokens(&text);
         Self { text, token_count }
     }

@@ -392,7 +392,7 @@ async fn embed_chunks(ctx: &PipelineContext, payload: &Value) -> Result<()> {
     }
 
     let rows: Vec<(Uuid, Vec<f32>)> = pairs.iter().map(|(id, _)| *id).zip(vectors).collect();
-    tessera_db::repos::embeddings::insert_batch(pool, ctx.space_id, &rows).await?;
+    tessera_db::repos::embeddings::insert_batch(pool, ctx.space_id, ctx.space_dim, &rows).await?;
 
     // Assign the freshly embedded chunks to clusters.
     let embedded_ids: Vec<String> = rows.iter().map(|(id, _)| id.to_string()).collect();

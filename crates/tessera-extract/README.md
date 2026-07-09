@@ -16,7 +16,10 @@ decoding, and no execution of content.
   declared type only as a weak hint.
 - `extractors.rs` - `normalize()` dispatches on the sniffed type to the
   per-format extractors (plain text, markdown, JSON/NDJSON, CSV, logs, HTML).
-- `chunk.rs` - the content-aware chunker producing `PreparedChunk`s.
+- `chunk.rs` - the content-aware chunker producing `PreparedChunk`s. Every chunk
+  is built through `PreparedChunk::new`, which applies `clean_text`, so all chunks
+  are control-character-clean by construction.
+- `text.rs` - `clean_text`, the control-character stripper for decoded content.
 - `security.rs` - the security pack: `refang()` (defang normalization) and
   `extract()` returning `EntityMatch`es (IPs, domains, URLs, emails, hashes, CVEs,
   MACs, ASNs), each carrying the canonical value the storage layer dedups on.
@@ -24,5 +27,5 @@ decoding, and no execution of content.
 - `plugin.rs` - the sandboxed subprocess plugin host (NDJSON `ExtractEvent` over
   stdio) for out-of-language extractors.
 
-`refang` and the canonicalization are safe primitives; see
+`refang`, the canonicalization, and `clean_text` are safe primitives; see
 `../../docs/PRIMITIVES.md`.
