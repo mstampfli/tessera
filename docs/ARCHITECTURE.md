@@ -85,7 +85,7 @@ policy is enforced at this single choke point.
 ```
 ingest bytes -> content-addressed store (blake3) + documents row
              -> classify + chunk
-             -> embed (provider)              -> chunk_embeddings (pgvector)
+             -> embed (provider, PROSE only)   -> chunk_embeddings (pgvector)
              -> extract entities              -> entities + mentions
   [ALGORITHMS decide correlation]
              -> co-occurrence / kNN / temporal -> entity_edges (scored)
@@ -93,6 +93,14 @@ ingest bytes -> content-addressed store (blake3) + documents row
   [LLM explains what algorithms grouped, on the citation leash]
              -> synthesize                     -> insights + insight_evidence
 ```
+
+Structured records (json/ndjson/csv) are NOT embedded: the record is the chunk,
+and it correlates on its extracted entities and full-text, never on prose
+geometry (an embedding of schema-heavy records groups them by shared structure,
+which is noise). Only prose (text/markdown/html) embeds and clusters, so insights
+are driven by substance. Records stay findable via full-text and entity-exact
+retrieval; entities mentioned only in records get no context embedding and so form
+no semantic edges (`is_structured_record` in `tessera-pipeline`).
 
 Retrieval for search and ask fuses pgvector kNN, Postgres full-text, and
 entity-exact matches with Reciprocal Rank Fusion; answers cite chunks.

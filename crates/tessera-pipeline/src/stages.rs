@@ -156,6 +156,32 @@ fn payload_uuid(payload: &Value, key: &str) -> Result<Uuid> {
         .ok_or_else(|| Error::new(ErrorKind::Invalid, format!("job payload missing {key}")))
 }
 
+/// Record-oriented content whose unit of meaning is the row, not prose: it
+/// correlates on its extracted entities and full-text, and is not embedded (its
+/// embedding would be dominated by shared schema, grouping unrelated records).
+/// Prose labels (text, markdown, html) and line-window logs embed normally.
+fn is_structured_record(label: &str) -> bool {
+    matches!(label, "json" | "ndjson" | "csv")
+}
+
+/// The single ready path for a fully-processed document: set status and emit the
+/// `document.ready` event. Used by every terminal branch (empty, already embedded,
+/// or a record type that skips embedding).
+async fn mark_ready(
+    pool: &tessera_db::Pool,
+    document_id: Uuid,
+    chunks: i64,
+    embedded: i64,
+) -> Result<()> {
+    documents::set_status(pool, document_id, "ready", None, true).await?;
+    let _ = queue::notify(
+        pool,
+        &json!({ "type": "document.ready", "document_id": document_id, "chunks": chunks, "embedded": embedded }),
+    )
+    .await;
+    Ok(())
+}
+
 /// Normalize + chunk a document, then fan out embedding jobs for its chunks.
 async fn process_document(ctx: &PipelineContext, payload: &Value) -> Result<()> {
     let document_id = payload_uuid(payload, "document_id")?;
@@ -218,13 +244,7 @@ async fn process_document(ctx: &PipelineContext, payload: &Value) -> Result<()> 
 
     // Empty document (no extractable text): it is done.
     if inputs.is_empty() {
-        documents::set_status(pool, document_id, "ready", None, true).await?;
-        let _ = queue::notify(
-            pool,
-            &json!({ "type": "document.ready", "document_id": document_id, "chunks": 0, "embedded": 0 }),
-        )
-        .await;
-        return Ok(());
+        return mark_ready(pool, document_id, 0, 0).await;
     }
 
     // Entity extraction is independent of embedding (it only needs the chunks),
@@ -241,6 +261,18 @@ async fn process_document(ctx: &PipelineContext, payload: &Value) -> Result<()> 
     )
     .await?;
 
+    // Structured records (json/ndjson/csv) ARE the chunk: they correlate on their
+    // extracted entities and full-text, not on prose embeddings. Embedding a
+    // schema-heavy record just groups records by shared structure (every quarry
+    // finding looks alike), which is noise, so skip it - entity extraction is
+    // already enqueued above, and record-only entities correctly get no context
+    // embedding (so no spurious semantic edges). Prose (text/markdown/html)
+    // embeds as before. See ARCHITECTURE invariant: algorithms correlate.
+    if is_structured_record(&sniffed.label) {
+        let n = i64::try_from(inputs.len()).unwrap_or(i64::MAX);
+        return mark_ready(pool, document_id, n, 0).await;
+    }
+
     // Which chunks still need embedding in the active space?
     let pending = chunks::ids_without_embedding(pool, document_id, ctx.space_id).await?;
 
@@ -248,14 +280,8 @@ async fn process_document(ctx: &PipelineContext, payload: &Value) -> Result<()> 
     // converge straight to ready instead of leaving the doc stuck at 'processing'
     // (no embed job would be enqueued to flip it back).
     if pending.is_empty() {
-        documents::set_status(pool, document_id, "ready", None, true).await?;
         let (total, embedded) = chunks::embedding_progress(pool, document_id, ctx.space_id).await?;
-        let _ = queue::notify(
-            pool,
-            &json!({ "type": "document.ready", "document_id": document_id, "chunks": total, "embedded": embedded }),
-        )
-        .await;
-        return Ok(());
+        return mark_ready(pool, document_id, total, embedded).await;
     }
 
     documents::set_status(pool, document_id, "processing", None, false).await?;
@@ -643,4 +669,19 @@ fn input_signature(
     ent.sort();
     let material = format!("{cluster_id}|{}|{}", parts.join(","), ent.join(","));
     ContentHash::of(material.as_bytes()).as_bytes().to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_structured_record;
+
+    #[test]
+    fn record_types_skip_embedding_prose_does_not() {
+        for r in ["json", "ndjson", "csv"] {
+            assert!(is_structured_record(r), "{r} is a record type");
+        }
+        for p in ["text", "markdown", "html", "logs", "pdf"] {
+            assert!(!is_structured_record(p), "{p} embeds as prose");
+        }
+    }
 }
