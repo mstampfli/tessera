@@ -26,6 +26,8 @@ conclusions with the evidence attached to every claim.
 The engine is general purpose. The flagship showcase is security and OSINT
 (indicators, logs, threat feeds, CVEs), where "actionable" is concrete: block
 this address, hunt this hash, patch this CVE, all cited back to the source.
+`docs/OSINT_TOOLS.md` catalogs the OSINT sources that feed and corroborate this
+domain, and is honest about the categories with no strong free tool.
 
 ## Architecture
 
