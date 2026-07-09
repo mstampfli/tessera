@@ -57,6 +57,11 @@ crates/
   tessera-server      tesserad: the binary and operator CLI
 ```
 
+Each crate has a README stating its job and place in the DAG.
+`docs/ARCHITECTURE.md` records the load-bearing invariants, `docs/PRIMITIVES.md`
+catalogs the safe primitives to reuse, and `CONTRIBUTING.md` has the build, test,
+and dev-loop recipe.
+
 ## Quickstart (development)
 
 Requires a recent Rust toolchain and Docker.
@@ -174,6 +179,12 @@ scripts/restore.sh backups/<timestamp>
   the tailnet interface, never a public one, by default.
 
 See `docs/THREAT_MODEL.md` for the STRIDE analysis.
+
+## Contributing
+
+`CONTRIBUTING.md` has the dev loop, the CI gates, and the conventions for adding
+an endpoint, extractor, provider, or pipeline stage. In short: `just db-up`,
+`just migrate`, `just serve`, and `just check` before every commit.
 
 ## Roadmap
 
