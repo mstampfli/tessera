@@ -34,3 +34,6 @@ pub const KIND_CORRELATE_ENTITIES: &str = "correlate_entities";
 /// Job kind: recompute entity communities (connected components of the
 /// co-occurrence graph) across the whole knowledge base.
 pub const KIND_DETECT_COMMUNITIES: &str = "detect_communities";
+/// Job kind: HDBSCAN density recluster of all chunk embeddings (authoritative;
+/// corrects the online-centroid provisional assignment).
+pub const KIND_RECLUSTER: &str = "recluster";

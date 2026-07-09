@@ -18,7 +18,7 @@ use crate::context::PipelineContext;
 use crate::synth;
 use crate::{
     KIND_ASSIGN_CLUSTERS, KIND_CORRELATE_ENTITIES, KIND_DETECT_COMMUNITIES, KIND_EMBED_CHUNKS,
-    KIND_EXTRACT_ENTITIES, KIND_PROCESS_DOCUMENT, KIND_SYNTHESIZE_INSIGHT,
+    KIND_EXTRACT_ENTITIES, KIND_PROCESS_DOCUMENT, KIND_RECLUSTER, KIND_SYNTHESIZE_INSIGHT,
 };
 
 /// Dispatch a claimed job to its handler.
@@ -31,11 +31,31 @@ pub async fn dispatch(ctx: &PipelineContext, kind: &str, payload: &Value) -> Res
         KIND_SYNTHESIZE_INSIGHT => synthesize_insight(ctx, payload).await,
         KIND_CORRELATE_ENTITIES => correlate_entities(ctx, payload).await,
         KIND_DETECT_COMMUNITIES => detect_communities(ctx, payload).await,
+        KIND_RECLUSTER => recluster(ctx, payload).await,
         other => Err(Error::new(
             ErrorKind::Invalid,
             format!("unknown job kind: {other}"),
         )),
     }
+}
+
+/// Authoritative HDBSCAN recluster over the whole space. Global and debounced, so
+/// a burst of ingestion collapses to one pass that corrects the online-centroid
+/// provisional assignment into density clusters.
+async fn recluster(ctx: &PipelineContext, _payload: &Value) -> Result<()> {
+    let r = crate::recluster::run(
+        &ctx.db,
+        ctx.space_id,
+        ctx.cluster_min_size,
+        ctx.synth_debounce_secs,
+    )
+    .await?;
+    let _ = queue::notify(
+        &ctx.db.worker,
+        &json!({ "type": "reclustered", "clusters": r.clusters, "noise": r.noise, "changed": r.changed }),
+    )
+    .await;
+    Ok(())
 }
 
 /// Recompute entity communities across the whole KB. Global and debounced (one
@@ -501,6 +521,20 @@ async fn assign_clusters(ctx: &PipelineContext, payload: &Value) -> Result<()> {
             }
         }
     }
+
+    // The online assignment above is a fast provisional; enqueue a debounced
+    // authoritative HDBSCAN recluster to correct it into density clusters.
+    queue::enqueue(
+        pool,
+        KIND_RECLUSTER,
+        &json!({}),
+        &EnqueueOpts {
+            dedupe_key: Some("recluster".to_string()),
+            delay_secs: Some(ctx.synth_debounce_secs),
+            ..Default::default()
+        },
+    )
+    .await?;
 
     let _ = queue::notify(
         pool,

@@ -201,6 +201,7 @@ pub async fn serve(config: Config) -> Result<()> {
         temporal_window_days: config.pipeline.temporal_window_days,
         temporal_tau_days: config.pipeline.temporal_tau_days,
         community_hub_degree: config.pipeline.community_hub_degree,
+        cluster_min_size: config.pipeline.cluster_min_size,
     };
 
     // Install the Prometheus recorder (global) and keep its render handle.
