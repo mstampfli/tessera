@@ -247,11 +247,22 @@ const EvidenceChunk = z.object({
   event_time: z.string().nullable().optional(),
 });
 
+export const CommonNeighbor = z.object({
+  id: z.string(),
+  kind: z.string(),
+  value: z.string(),
+  a_method: z.string(),
+  a_strength: z.number(),
+  b_method: z.string(),
+  b_strength: z.number(),
+});
+
 export const CorrelationDetail = z.object({
   a: Entity,
   b: Entity,
   links: z.array(z.object({ method: z.string(), strength: z.number() })),
   shared_chunks: z.array(EvidenceChunk),
+  common: z.array(CommonNeighbor),
   a_sample: EvidenceChunk.nullable().optional(),
   b_sample: EvidenceChunk.nullable().optional(),
 });

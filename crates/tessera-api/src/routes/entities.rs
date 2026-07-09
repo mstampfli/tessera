@@ -259,11 +259,24 @@ impl From<entities::EvidenceChunk> for EvidenceView {
 }
 
 #[derive(Debug, Serialize)]
+struct CommonNeighborView {
+    id: Uuid,
+    kind: String,
+    value: String,
+    a_method: String,
+    a_strength: f64,
+    b_method: String,
+    b_strength: f64,
+}
+
+#[derive(Debug, Serialize)]
 struct CorrelationDetail {
     a: EntityView,
     b: EntityView,
     links: Vec<serde_json::Value>,
     shared_chunks: Vec<EvidenceView>,
+    /// Entities both endpoints connect to (the structural reason they relate).
+    common: Vec<CommonNeighborView>,
     a_sample: Option<EvidenceView>,
     b_sample: Option<EvidenceView>,
 }
@@ -286,6 +299,7 @@ async fn correlation(
         .ok_or_else(|| ApiError(Error::not_found("entity")))?;
     let links = entities::pair_links(pool, params.a, params.b).await?;
     let shared = entities::shared_chunks(pool, params.a, params.b, 3).await?;
+    let common = entities::common_neighbors(pool, params.a, params.b, 8).await?;
     // For a non-co-occurring link, show the two contexts whose similarity drives
     // it (the most-similar chunk pair), not arbitrary mentions.
     let (a_sample, b_sample) =
@@ -307,6 +321,18 @@ async fn correlation(
             .map(|l| serde_json::json!({ "method": l.method, "strength": l.strength }))
             .collect(),
         shared_chunks: shared.into_iter().map(EvidenceView::from).collect(),
+        common: common
+            .into_iter()
+            .map(|c| CommonNeighborView {
+                id: c.id,
+                kind: c.kind,
+                value: c.value,
+                a_method: c.a_method,
+                a_strength: c.a_strength,
+                b_method: c.b_method,
+                b_strength: c.b_strength,
+            })
+            .collect(),
         a_sample: a_sample.map(EvidenceView::from),
         b_sample: b_sample.map(EvidenceView::from),
     }))

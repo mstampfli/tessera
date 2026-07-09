@@ -261,6 +261,73 @@ pub async fn shared_chunks(
     .map_err(map_sqlx)
 }
 
+/// An entity that BOTH A and B connect to: the structural reason two things that
+/// never co-occur are related (e.g. both hosted on the same ASN). Carries the
+/// strongest edge from A and from B to the shared entity.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct CommonNeighbor {
+    pub id: Uuid,
+    pub kind: String,
+    pub value: String,
+    pub a_method: String,
+    pub a_strength: f64,
+    pub b_method: String,
+    pub b_strength: f64,
+}
+
+/// Entities that both A and B are correlated with (shared connectors), strongest
+/// combined link first. One row per shared entity, keeping its strongest edge to
+/// each side.
+pub async fn common_neighbors(
+    pool: &PgPool,
+    a: Uuid,
+    b: Uuid,
+    limit: i64,
+) -> Result<Vec<CommonNeighbor>> {
+    sqlx::query_as::<_, CommonNeighbor>(
+        "WITH na AS (
+             SELECT nbr, rel, str FROM (
+                 SELECT CASE WHEN src_id = $1 THEN dst_id ELSE src_id END AS nbr, rel,
+                        (CASE WHEN rel = 'co_occurs' THEN LEAST(1.0, 0.6 + 0.08 * source_count)
+                              ELSE GREATEST(0.0, LEAST(1.0, weight)) END)::float8 AS str,
+                        row_number() OVER (
+                            PARTITION BY CASE WHEN src_id = $1 THEN dst_id ELSE src_id END
+                            ORDER BY (CASE WHEN rel = 'co_occurs' THEN LEAST(1.0, 0.6 + 0.08 * source_count)
+                                           ELSE GREATEST(0.0, LEAST(1.0, weight)) END) DESC
+                        ) rn
+                 FROM entity_edges WHERE src_id = $1 OR dst_id = $1
+             ) t WHERE rn = 1
+         ),
+         nb AS (
+             SELECT nbr, rel, str FROM (
+                 SELECT CASE WHEN src_id = $2 THEN dst_id ELSE src_id END AS nbr, rel,
+                        (CASE WHEN rel = 'co_occurs' THEN LEAST(1.0, 0.6 + 0.08 * source_count)
+                              ELSE GREATEST(0.0, LEAST(1.0, weight)) END)::float8 AS str,
+                        row_number() OVER (
+                            PARTITION BY CASE WHEN src_id = $2 THEN dst_id ELSE src_id END
+                            ORDER BY (CASE WHEN rel = 'co_occurs' THEN LEAST(1.0, 0.6 + 0.08 * source_count)
+                                           ELSE GREATEST(0.0, LEAST(1.0, weight)) END) DESC
+                        ) rn
+                 FROM entity_edges WHERE src_id = $2 OR dst_id = $2
+             ) t WHERE rn = 1
+         )
+         SELECT e.id, e.kind, e.value,
+                na.rel AS a_method, na.str AS a_strength,
+                nb.rel AS b_method, nb.str AS b_strength
+         FROM na JOIN nb ON na.nbr = nb.nbr
+         JOIN entities e ON e.id = na.nbr
+         WHERE na.nbr <> $1 AND na.nbr <> $2
+         ORDER BY na.str + nb.str DESC, e.id
+         LIMIT $3",
+    )
+    .bind(a)
+    .bind(b)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)
+}
+
 /// The pair of chunks - one mentioning A, one mentioning B - whose embeddings
 /// are the most similar. For a semantic correlation these are the two contexts
 /// whose similarity actually produced the link, so they explain *why* two
