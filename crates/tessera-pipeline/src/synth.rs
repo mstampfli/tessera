@@ -12,14 +12,19 @@ use tessera_core::error::{Error, ErrorKind, Result};
 use tessera_db::repos::clusters::MemberChunk;
 use tessera_providers::{generate_json, GenRequest, LlmProvider};
 
-const SYSTEM: &str = "You are a security intelligence analyst. You are given a group of related \
-excerpts that an algorithm has already clustered together, and the notable entities in them. \
-Write ONE actionable insight about what this group is and what to do. \
+const SYSTEM: &str = "You describe what a group of related records shows, factually and \
+objectively. An algorithm has already grouped these excerpts; say what they are and how they \
+relate. Records co-occurring, or sharing infrastructure, a hosting provider, a CDN, or a \
+certificate authority, is NOT evidence of an attack, intent, or compromise; do not infer one. \
+These are records the operator collected about their own or authorized targets, not detections \
+of an adversary. The context includes a SECURITY SIGNAL line: discuss a security concern, and \
+raise severity above 'info', ONLY when that line lists concrete indicators; if it says none, \
+stay neutral and set severity to 'info' with no alarmist actions. \
 Respond with STRICT JSON only, no prose outside the JSON, with exactly these fields: \
 title (string, short), narrative (string; cite supporting excerpts inline as [E1], [E2], etc; \
 every claim must have a citation and you may only use the E-numbers provided), \
 severity (one of: info, low, medium, high, critical), confidence (number 0 to 1), \
-suggested_actions (array of short imperative strings). \
+suggested_actions (array of short imperative strings; may be empty). \
 Use only the provided context; invent nothing.";
 
 /// The parsed model output.
@@ -66,11 +71,7 @@ pub async fn synthesize(
         .await
         .map_err(|e| Error::new(ErrorKind::Provider, format!("insight synthesis: {e}")))?;
 
-    let severity = if ALLOWED_SEVERITY.contains(&raw.severity.as_str()) {
-        raw.severity
-    } else {
-        "medium".to_string()
-    };
+    let severity = normalize_severity(&raw.severity, has_harm_signal(entities));
     let cited: Vec<usize> = referenced_markers(&raw.narrative, chunks.len())
         .into_iter()
         .collect();
@@ -104,9 +105,52 @@ fn build_prompt(chunks: &[MemberChunk], entities: &[(String, String)]) -> String
             .join(", ")
     };
     format!(
-        "Notable entities in this group: {ent_list}\n\nExcerpts:\n{ctx}\n\
-         Write the JSON insight now."
+        "Security signal: {}\n\nNotable entities in this group: {ent_list}\n\nExcerpts:\n{ctx}\n\
+         Write the JSON insight now.",
+        security_signal(entities)
     )
+}
+
+/// The deterministic security signal for a group, computed from its own entities.
+/// Today the only structural harm indicator tessera extracts is a CVE reference;
+/// the line stays honest about that. Other indicators (a malicious-IP
+/// classification, exposed credentials, an IOC that matches a threat feed) are
+/// added here as tessera learns to extract them as structured entities.
+fn security_signal(entities: &[(String, String)]) -> String {
+    let cves: Vec<&str> = entities
+        .iter()
+        .filter(|(kind, _)| kind.eq_ignore_ascii_case(tessera_extract::security::kind::CVE))
+        .map(|(_, v)| v.as_str())
+        .collect();
+    if cves.is_empty() {
+        "none detected (treat these as neutral observation records)".to_string()
+    } else {
+        format!("vulnerability references present: {}", cves.join(", "))
+    }
+}
+
+/// Whether the group carries a structural harm indicator that justifies a security
+/// framing (see `security_signal`). Absent one, the group is neutral observation
+/// data and its insight stays objective.
+fn has_harm_signal(entities: &[(String, String)]) -> bool {
+    entities
+        .iter()
+        .any(|(kind, _)| kind.eq_ignore_ascii_case(tessera_extract::security::kind::CVE))
+}
+
+/// Severity is bounded by the evidence, not asserted by the model (the correlation
+/// invariant applied to severity): with no harm signal the group is a neutral
+/// observation and severity is forced to `info`; with one, the model's severity is
+/// honored, and an invalid value degrades to `low` rather than inflating to medium.
+fn normalize_severity(raw: &str, has_harm: bool) -> String {
+    if !has_harm {
+        return "info".to_string();
+    }
+    if ALLOWED_SEVERITY.contains(&raw) {
+        raw.to_string()
+    } else {
+        "low".to_string()
+    }
 }
 
 /// Distinct `[E<number>]` markers within `[1, max]` that the narrative cites.
@@ -137,11 +181,45 @@ fn referenced_markers(narrative: &str, max: usize) -> BTreeSet<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::referenced_markers;
+    use super::{has_harm_signal, normalize_severity, referenced_markers, security_signal};
+
+    fn ents(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
 
     #[test]
     fn markers_are_bounded_and_deduped() {
         let got = referenced_markers("a [E1] b [E3] c [E1] d [E9]", 3);
         assert_eq!(got.into_iter().collect::<Vec<_>>(), vec![1, 3]);
+    }
+
+    #[test]
+    fn neutral_infrastructure_has_no_harm_signal() {
+        let e = ents(&[("ip", "188.114.96.12"), ("domain", "mstampfli.com")]);
+        assert!(!has_harm_signal(&e));
+        assert!(security_signal(&e).starts_with("none detected"));
+    }
+
+    #[test]
+    fn a_cve_reference_is_a_harm_signal() {
+        let e = ents(&[("domain", "x.com"), ("cve", "CVE-2026-1")]);
+        assert!(has_harm_signal(&e));
+        assert!(security_signal(&e).contains("CVE-2026-1"));
+    }
+
+    #[test]
+    fn no_harm_forces_info_regardless_of_the_model() {
+        // The model crying "critical" over neutral DNS/cert records is capped to info.
+        assert_eq!(normalize_severity("critical", false), "info");
+        assert_eq!(normalize_severity("high", false), "info");
+    }
+
+    #[test]
+    fn harm_signal_honors_model_severity_but_degrades_invalid_to_low() {
+        assert_eq!(normalize_severity("high", true), "high");
+        assert_eq!(normalize_severity("nonsense", true), "low");
     }
 }
