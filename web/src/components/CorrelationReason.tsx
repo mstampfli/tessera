@@ -42,7 +42,9 @@ export function CorrelationReason({ detail }: { detail: CorrelationDetail }) {
         </>
       ) : (
         <>
-          <p className="mk-kicker mt-3">never stated together; each appears in</p>
+          <p className="mk-kicker mt-3">
+            never stated together; correlated by these similar contexts
+          </p>
           {[detail.a_sample, detail.b_sample].filter(Boolean).map(
             (c) =>
               c && (

@@ -261,6 +261,70 @@ pub async fn shared_chunks(
     .map_err(map_sqlx)
 }
 
+/// The pair of chunks - one mentioning A, one mentioning B - whose embeddings
+/// are the most similar. For a semantic correlation these are the two contexts
+/// whose similarity actually produced the link, so they explain *why* two
+/// entities that never co-occur are related. Bounded to recent mentions per side.
+pub async fn driving_chunks(
+    pool: &PgPool,
+    space_id: i16,
+    dim: i32,
+    a: Uuid,
+    b: Uuid,
+) -> Result<Option<(EvidenceChunk, EvidenceChunk)>> {
+    let row = sqlx::query_as::<_, (Uuid, Uuid, Option<String>, String, Option<DateTime<Utc>>, Uuid, Uuid, Option<String>, String, Option<DateTime<Utc>>)>(&format!(
+        "WITH ac AS (
+             SELECT c.id, c.document_id, d.title, left(c.text, 300) AS excerpt, d.event_time, e.embedding
+             FROM entity_mentions m
+             JOIN chunks c ON c.id = m.chunk_id
+             JOIN documents d ON d.id = c.document_id
+             JOIN chunk_embeddings e ON e.chunk_id = c.id AND e.space_id = $3
+             WHERE m.entity_id = $1
+             ORDER BY c.id DESC LIMIT 25
+         ),
+         bc AS (
+             SELECT c.id, c.document_id, d.title, left(c.text, 300) AS excerpt, d.event_time, e.embedding
+             FROM entity_mentions m
+             JOIN chunks c ON c.id = m.chunk_id
+             JOIN documents d ON d.id = c.document_id
+             JOIN chunk_embeddings e ON e.chunk_id = c.id AND e.space_id = $3
+             WHERE m.entity_id = $2
+             ORDER BY c.id DESC LIMIT 25
+         )
+         SELECT ac.id, ac.document_id, ac.title, ac.excerpt, ac.event_time,
+                bc.id, bc.document_id, bc.title, bc.excerpt, bc.event_time
+         FROM ac CROSS JOIN bc
+         WHERE ac.id <> bc.id
+         ORDER BY ac.embedding::halfvec({dim}) <=> bc.embedding::halfvec({dim})
+         LIMIT 1",
+    ))
+    .bind(a)
+    .bind(b)
+    .bind(space_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(map_sqlx)?;
+
+    Ok(row.map(|r| {
+        (
+            EvidenceChunk {
+                chunk_id: r.0,
+                document_id: r.1,
+                title: r.2,
+                excerpt: r.3,
+                event_time: r.4,
+            },
+            EvidenceChunk {
+                chunk_id: r.5,
+                document_id: r.6,
+                title: r.7,
+                excerpt: r.8,
+                event_time: r.9,
+            },
+        )
+    }))
+}
+
 /// One representative mention of an entity (a sentence it appears in), so a
 /// semantic or temporal link can still be grounded in real text.
 pub async fn sample_mention(pool: &PgPool, entity_id: Uuid) -> Result<Option<EvidenceChunk>> {

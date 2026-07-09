@@ -286,8 +286,18 @@ async fn correlation(
         .ok_or_else(|| ApiError(Error::not_found("entity")))?;
     let links = entities::pair_links(pool, params.a, params.b).await?;
     let shared = entities::shared_chunks(pool, params.a, params.b, 3).await?;
-    let a_sample = entities::sample_mention(pool, params.a).await?;
-    let b_sample = entities::sample_mention(pool, params.b).await?;
+    // For a non-co-occurring link, show the two contexts whose similarity drives
+    // it (the most-similar chunk pair), not arbitrary mentions.
+    let (a_sample, b_sample) =
+        match entities::driving_chunks(pool, state.space.id, state.space.dim, params.a, params.b)
+            .await?
+        {
+            Some((a, b)) => (Some(a), Some(b)),
+            None => (
+                entities::sample_mention(pool, params.a).await?,
+                entities::sample_mention(pool, params.b).await?,
+            ),
+        };
 
     Ok(Json(CorrelationDetail {
         a: view(a),
