@@ -64,7 +64,7 @@ impl Db {
         sqlx::migrate!("./migrations")
             .run(&self.api)
             .await
-            .map_err(|e| Error::new(ErrorKind::Db, "migration failed").with_source(e))
+            .map_err(|e| Error::new(ErrorKind::Db, format!("migration failed: {e}")))
     }
 
     /// Cheap readiness probe: a round-trip `SELECT 1`.
