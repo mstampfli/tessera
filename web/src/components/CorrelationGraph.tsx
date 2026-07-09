@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type Graph from "graphology";
 
@@ -64,6 +64,10 @@ export function CorrelationGraph({
   const mouseRef = useRef({ x: 0, y: 0 });
   const onSelectEdgeRef = useRef(onSelectEdge);
   onSelectEdgeRef.current = onSelectEdge;
+  // Minimum edge strength to show; filters via the edge reducer (no rebuild).
+  const [minStrength, setMinStrength] = useState(0);
+  const minStrengthRef = useRef(0);
+  minStrengthRef.current = minStrength;
   const router = useRouter();
   const sigmaRef = useRef<SigmaLike | null>(null);
   const hoveredRef = useRef<string | null>(null);
@@ -228,6 +232,11 @@ export function CorrelationGraph({
       });
       sigma.setSetting("edgeReducer", (edge: string, data: EdgeData): EdgeData => {
         const res: EdgeData = { ...data };
+        const strength = graph.getEdgeAttribute(edge, "strength");
+        if (typeof strength === "number" && strength < minStrengthRef.current) {
+          res.hidden = true;
+          return res;
+        }
         const hov = hoveredRef.current;
         if (hov) {
           const [s, t] = graph.extremities(edge);
@@ -290,10 +299,10 @@ export function CorrelationGraph({
     };
   }, [nodes, edges, centerId, router]);
 
-  // Repaint (not rebuild) when the external selection changes.
+  // Repaint (not rebuild) when the selection or the strength filter changes.
   useEffect(() => {
     sigmaRef.current?.refresh();
-  }, [selectedId]);
+  }, [selectedId, minStrength]);
 
   if (nodes.length === 0) {
     return (
@@ -311,6 +320,25 @@ export function CorrelationGraph({
         mouseRef.current = { x: e.clientX - r.left, y: e.clientY - r.top };
       }}
     >
+      <label
+        className="mb-1 flex items-center gap-2 text-[11px]"
+        style={{ color: "var(--mk-text-3)" }}
+      >
+        min strength
+        <input
+          type="range"
+          min={0}
+          max={0.95}
+          step={0.05}
+          value={minStrength}
+          onChange={(e) => setMinStrength(Number(e.target.value))}
+          className="w-32"
+          aria-label="minimum correlation strength"
+        />
+        <span className="font-mono" style={{ color: "var(--mk-text-2)" }}>
+          {Math.round(minStrength * 100)}
+        </span>
+      </label>
       <div
         ref={containerRef}
         className="w-full overflow-hidden rounded"

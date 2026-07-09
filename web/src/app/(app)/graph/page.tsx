@@ -20,7 +20,6 @@ export default function GraphPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<{ a: string; b: string } | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [minStrength, setMinStrength] = useState(0);
   const [kinds, setKinds] = useState<string[]>([]);
 
   const q = useQuery({
@@ -71,17 +70,14 @@ export default function GraphPage() {
   );
   const graphEdges = useMemo(
     () =>
-      q.data?.edges
-        .filter((e) => e.strength >= minStrength)
-        .map((e) => ({
-          source: e.src_id,
-          target: e.dst_id,
-          weight: e.strength,
-          method: e.method,
-        })) ?? [],
-    [q.data, minStrength],
+      q.data?.edges.map((e) => ({
+        source: e.src_id,
+        target: e.dst_id,
+        weight: e.strength,
+        method: e.method,
+      })) ?? [],
+    [q.data],
   );
-  const hiddenEdges = (q.data?.edges.length ?? 0) - graphEdges.length;
 
   const selected = q.data?.nodes.find((n) => n.id === selectedId) ?? null;
   const neighbors = useMemo(() => {
@@ -125,23 +121,6 @@ export default function GraphPage() {
             <span style={{ color: "var(--mk-highlight)" }}>bridge</span>; node colour =
             community.
           </p>
-          <label className="mt-2 flex items-center gap-2 text-[11px]" style={{ color: "var(--mk-text-3)" }}>
-            min strength
-            <input
-              type="range"
-              min={0}
-              max={0.95}
-              step={0.05}
-              value={minStrength}
-              onChange={(e) => setMinStrength(Number(e.target.value))}
-              className="w-32"
-              aria-label="minimum correlation strength"
-            />
-            <span className="font-mono" style={{ color: "var(--mk-text-2)" }}>
-              {Math.round(minStrength * 100)}
-            </span>
-            {hiddenEdges > 0 && <span>({hiddenEdges} weaker links hidden)</span>}
-          </label>
         </div>
         <div className="flex flex-wrap gap-1" role="group" aria-label="filter by kind">
           <button

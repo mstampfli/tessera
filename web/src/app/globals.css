@@ -145,6 +145,11 @@ a {
   outline-offset: 2px;
 }
 
+/* Range sliders use the maka accent, not the browser's default blue. */
+input[type="range"] {
+  accent-color: var(--mk-accent);
+}
+
 /* Respect a user's reduced-motion preference: no transitions, no smooth scroll. */
 @media (prefers-reduced-motion: reduce) {
   *,
