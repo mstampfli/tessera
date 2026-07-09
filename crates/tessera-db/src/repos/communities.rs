@@ -70,7 +70,7 @@ impl UnionFind {
 /// co-occurrence graph it belongs to. Deterministic: components are numbered by
 /// their smallest member id, so ids are stable across runs given the same graph.
 /// Returns the number of distinct communities.
-pub async fn detect(pool: &PgPool) -> Result<i64> {
+pub async fn detect(pool: &PgPool, hub_max_degree: i64) -> Result<i64> {
     let entity_ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM entities")
         .fetch_all(pool)
         .await
@@ -84,6 +84,18 @@ pub async fn detect(pool: &PgPool) -> Result<i64> {
             .await
             .map_err(map_sqlx)?;
 
+    // Hub guard: an entity that co-occurs with a huge number of others (a generic
+    // date, a ubiquitous tool name) would otherwise chain every community into one
+    // blob. Above `hub_max_degree` it is not allowed to merge communities, so the
+    // structure stays meaningful. A non-positive cap disables the guard.
+    let mut degree: HashMap<Uuid, i64> = HashMap::new();
+    for (a, b) in &edges {
+        *degree.entry(*a).or_insert(0) += 1;
+        *degree.entry(*b).or_insert(0) += 1;
+    }
+    let is_hub =
+        |id: &Uuid| hub_max_degree > 0 && degree.get(id).copied().unwrap_or(0) > hub_max_degree;
+
     let mut uf = UnionFind::new();
     for id in &entity_ids {
         uf.add(*id);
@@ -91,6 +103,9 @@ pub async fn detect(pool: &PgPool) -> Result<i64> {
     for (a, b) in &edges {
         uf.add(*a);
         uf.add(*b);
+        if is_hub(a) || is_hub(b) {
+            continue;
+        }
         uf.union(*a, *b);
     }
 

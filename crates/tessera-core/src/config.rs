@@ -120,6 +120,10 @@ pub struct PipelineConfig {
     /// Decay constant, in days, for temporal edge strength (exp(-delta/tau)).
     #[serde(default = "default_temporal_tau_days")]
     pub temporal_tau_days: f64,
+    /// Co-occurrence degree above which an entity is treated as a hub and is not
+    /// allowed to merge communities (0 disables the guard).
+    #[serde(default = "default_community_hub_degree")]
+    pub community_hub_degree: i64,
 }
 
 fn default_embedder() -> String {
@@ -176,6 +180,9 @@ fn default_temporal_window_days() -> f64 {
 fn default_temporal_tau_days() -> f64 {
     7.0
 }
+fn default_community_hub_degree() -> i64 {
+    25
+}
 fn default_synth_debounce_secs() -> i64 {
     30
 }
@@ -230,6 +237,7 @@ impl Default for PipelineConfig {
             semantic_min_sim: default_semantic_min_sim(),
             temporal_window_days: default_temporal_window_days(),
             temporal_tau_days: default_temporal_tau_days(),
+            community_hub_degree: default_community_hub_degree(),
         }
     }
 }

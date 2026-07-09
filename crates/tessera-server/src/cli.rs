@@ -129,6 +129,7 @@ async fn connect(config: &Config) -> Result<Db> {
 }
 
 /// Run the service. Applies migrations (idempotent, advisory-locked) then serves.
+#[allow(clippy::too_many_lines)]
 pub async fn serve(config: Config) -> Result<()> {
     let db = connect(&config).await?;
     db.migrate()
@@ -196,6 +197,7 @@ pub async fn serve(config: Config) -> Result<()> {
         semantic_min_sim: config.pipeline.semantic_min_sim,
         temporal_window_days: config.pipeline.temporal_window_days,
         temporal_tau_days: config.pipeline.temporal_tau_days,
+        community_hub_degree: config.pipeline.community_hub_degree,
     };
 
     // Install the Prometheus recorder (global) and keep its render handle.
@@ -333,9 +335,10 @@ pub async fn recorrelate(config: Config) -> Result<()> {
     )
     .await
     .map_err(|e| anyhow!(e.to_string()))?;
-    let communities = tessera_db::repos::communities::detect(&db.api)
-        .await
-        .map_err(|e| anyhow!(e.to_string()))?;
+    let communities =
+        tessera_db::repos::communities::detect(&db.api, config.pipeline.community_hub_degree)
+            .await
+            .map_err(|e| anyhow!(e.to_string()))?;
     println!(
         "recorrelated: {embedded} entity embeddings, {edges} semantic edges, {temporal} temporal edges, {communities} communities"
     );

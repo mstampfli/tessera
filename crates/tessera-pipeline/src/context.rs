@@ -37,4 +37,6 @@ pub struct PipelineContext {
     pub temporal_window_days: f64,
     /// Decay constant (days) for temporal edge strength.
     pub temporal_tau_days: f64,
+    /// Co-occurrence degree above which an entity cannot merge communities.
+    pub community_hub_degree: i64,
 }
