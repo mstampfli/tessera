@@ -30,3 +30,6 @@ pub const KIND_SYNTHESIZE_INSIGHT: &str = "synthesize_insight";
 /// Job kind: materialize a document's entity embeddings and (re)compute their
 /// global semantic-similarity edges across the whole knowledge base.
 pub const KIND_CORRELATE_ENTITIES: &str = "correlate_entities";
+/// Job kind: recompute entity communities (connected components of the
+/// co-occurrence graph) across the whole knowledge base.
+pub const KIND_DETECT_COMMUNITIES: &str = "detect_communities";

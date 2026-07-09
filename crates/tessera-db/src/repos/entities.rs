@@ -25,7 +25,8 @@ pub async fn graph(
     node_cap: i64,
 ) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)> {
     let nodes = sqlx::query_as::<_, GraphNode>(
-        "SELECT e.id, e.kind, e.value, e.display_value, e.mention_count::bigint AS weight
+        "SELECT e.id, e.kind, e.value, e.display_value, e.mention_count::bigint AS weight,
+                e.community_id
          FROM entities e
          LEFT JOIN (
              SELECT id, count(*) AS deg FROM (

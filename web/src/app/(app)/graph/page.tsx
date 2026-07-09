@@ -17,6 +17,7 @@ export default function GraphPage() {
     queryKey: ["graph", kind],
     queryFn: () => api.graph(kind || undefined, NODE_CAP),
   });
+  const bridgesQ = useQuery({ queryKey: ["bridges"], queryFn: () => api.bridges(30) });
 
   // Learn the full kind list from the unfiltered view so the filter chips stay
   // stable when a kind is selected.
@@ -38,6 +39,7 @@ export default function GraphPage() {
         label: n.value,
         kind: n.kind,
         weight: n.weight,
+        community: n.community_id,
       })) ?? [],
     [q.data],
   );
@@ -129,9 +131,46 @@ export default function GraphPage() {
 
         <aside className="w-full lg:w-80 lg:shrink-0">
           {!selected && (
-            <div className="mk-card p-4 text-sm" style={{ color: "var(--mk-text-3)" }}>
-              select a node to see the entity and its correlations. hover to isolate
-              its connections; drag to pan, scroll to zoom.
+            <div className="mk-frame p-4">
+              <span className="mk-kicker">bridges</span>
+              <p className="mt-1 text-xs" style={{ color: "var(--mk-text-3)" }}>
+                non-obvious links: entities in different communities (never mentioned
+                together) that are contextually related. select a node to inspect it.
+              </p>
+              {bridgesQ.data && bridgesQ.data.length === 0 && (
+                <p className="mt-3 text-sm" style={{ color: "var(--mk-text-3)" }}>
+                  no cross-community bridges yet.
+                </p>
+              )}
+              <ul className="mt-3 space-y-2">
+                {bridgesQ.data?.slice(0, 15).map((br) => (
+                  <li key={`${br.a_id}-${br.b_id}`} className="text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="mk-tag mk-tag--warn">bridge</span>
+                      <span className="font-mono" style={{ color: "var(--mk-highlight)" }}>
+                        {Math.round(br.strength * 100)}
+                      </span>
+                    </div>
+                    <button
+                      className="mt-1 block w-full truncate text-left font-mono hover:underline"
+                      onClick={() => setSelectedId(br.a_id)}
+                      style={{ color: "var(--mk-text-2)" }}
+                    >
+                      {br.a_kind.replace("hash_", "")}: {br.a_value}
+                    </button>
+                    <div className="text-center" style={{ color: "var(--mk-text-3)" }}>
+                      &darr;
+                    </div>
+                    <button
+                      className="block w-full truncate text-left font-mono hover:underline"
+                      onClick={() => setSelectedId(br.b_id)}
+                      style={{ color: "var(--mk-text-2)" }}
+                    >
+                      {br.b_kind.replace("hash_", "")}: {br.b_value}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
           {selected && (

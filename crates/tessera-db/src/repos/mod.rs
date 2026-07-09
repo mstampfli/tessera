@@ -5,6 +5,7 @@ pub mod api_tokens;
 pub mod audit;
 pub mod chunks;
 pub mod clusters;
+pub mod communities;
 pub mod documents;
 pub mod embeddings;
 pub mod entities;

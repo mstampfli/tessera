@@ -26,6 +26,7 @@ export default function ClusterDetailPage({ params }: { params: Promise<{ id: st
         label: n.value,
         kind: n.kind,
         weight: n.weight,
+        community: n.community_id,
       })) ?? [],
     [graph.data],
   );

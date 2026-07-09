@@ -17,8 +17,8 @@ use uuid::Uuid;
 use crate::context::PipelineContext;
 use crate::synth;
 use crate::{
-    KIND_ASSIGN_CLUSTERS, KIND_CORRELATE_ENTITIES, KIND_EMBED_CHUNKS, KIND_EXTRACT_ENTITIES,
-    KIND_PROCESS_DOCUMENT, KIND_SYNTHESIZE_INSIGHT,
+    KIND_ASSIGN_CLUSTERS, KIND_CORRELATE_ENTITIES, KIND_DETECT_COMMUNITIES, KIND_EMBED_CHUNKS,
+    KIND_EXTRACT_ENTITIES, KIND_PROCESS_DOCUMENT, KIND_SYNTHESIZE_INSIGHT,
 };
 
 /// Dispatch a claimed job to its handler.
@@ -30,11 +30,25 @@ pub async fn dispatch(ctx: &PipelineContext, kind: &str, payload: &Value) -> Res
         KIND_ASSIGN_CLUSTERS => assign_clusters(ctx, payload).await,
         KIND_SYNTHESIZE_INSIGHT => synthesize_insight(ctx, payload).await,
         KIND_CORRELATE_ENTITIES => correlate_entities(ctx, payload).await,
+        KIND_DETECT_COMMUNITIES => detect_communities(ctx, payload).await,
         other => Err(Error::new(
             ErrorKind::Invalid,
             format!("unknown job kind: {other}"),
         )),
     }
+}
+
+/// Recompute entity communities across the whole KB. Global and debounced (one
+/// run collapses a burst of ingestion), so it runs after correlation settles.
+async fn detect_communities(ctx: &PipelineContext, _payload: &Value) -> Result<()> {
+    let pool = &ctx.db.worker;
+    let n = tessera_db::repos::communities::detect(pool).await?;
+    let _ = queue::notify(
+        pool,
+        &json!({ "type": "communities.detected", "communities": n }),
+    )
+    .await;
+    Ok(())
 }
 
 /// Materialize the document's entity embeddings and (re)compute their global
@@ -65,6 +79,20 @@ async fn correlate_entities(ctx: &PipelineContext, payload: &Value) -> Result<()
         )
         .await?;
     }
+
+    // Communities depend on the co-occurrence graph, which extraction already
+    // updated; recompute them globally, debounced so a burst collapses to one run.
+    queue::enqueue(
+        pool,
+        KIND_DETECT_COMMUNITIES,
+        &json!({}),
+        &EnqueueOpts {
+            dedupe_key: Some("detect_communities".to_string()),
+            delay_secs: Some(ctx.synth_debounce_secs),
+            ..Default::default()
+        },
+    )
+    .await?;
 
     let _ = queue::notify(
         pool,

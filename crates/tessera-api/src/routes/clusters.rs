@@ -102,6 +102,7 @@ struct GraphNodeView {
     value: String,
     display_value: String,
     weight: i64,
+    community_id: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -140,6 +141,7 @@ async fn graph(
                 value: n.value,
                 display_value: n.display_value,
                 weight: n.weight,
+                community_id: n.community_id,
             })
             .collect(),
         edges: edges

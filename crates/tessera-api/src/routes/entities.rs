@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/entities/{id}", get(detail))
         .route("/entities/{id}/neighborhood", get(neighborhood))
         .route("/graph", get(graph))
+        .route("/bridges", get(bridges))
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,6 +155,8 @@ struct GraphNodeView {
     value: String,
     display_value: String,
     weight: i64,
+    /// Structural community (for node colouring); null before detection runs.
+    community_id: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,6 +201,7 @@ async fn graph(
                 value: n.value,
                 display_value: n.display_value,
                 weight: n.weight,
+                community_id: n.community_id,
             })
             .collect(),
         edges: edges
@@ -211,4 +215,44 @@ async fn graph(
             .collect(),
         total,
     }))
+}
+
+#[derive(Debug, Serialize)]
+struct BridgeView {
+    a_id: Uuid,
+    a_kind: String,
+    a_value: String,
+    a_community: i32,
+    b_id: Uuid,
+    b_kind: String,
+    b_value: String,
+    b_community: i32,
+    strength: f64,
+}
+
+/// The strongest cross-community bridges: semantic links between entities that
+/// belong to different co-occurrence communities (things never stated together).
+async fn bridges(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Query(params): Query<GraphParams>,
+) -> Result<Json<Vec<BridgeView>>, ApiError> {
+    ctx.require(Scope::Read)?;
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let rows = tessera_db::repos::communities::bridges(&state.db.api, limit).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|b| BridgeView {
+                a_id: b.a_id,
+                a_kind: b.a_kind,
+                a_value: b.a_value,
+                a_community: b.a_community,
+                b_id: b.b_id,
+                b_kind: b.b_kind,
+                b_value: b.b_value,
+                b_community: b.b_community,
+                strength: b.strength,
+            })
+            .collect(),
+    ))
 }

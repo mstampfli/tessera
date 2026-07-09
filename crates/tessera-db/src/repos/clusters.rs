@@ -259,6 +259,8 @@ pub struct GraphNode {
     pub value: String,
     pub display_value: String,
     pub weight: i64,
+    /// Structural community (connected component of the co-occurrence graph).
+    pub community_id: Option<i32>,
 }
 
 /// An edge in an entity graph: a correlation between two entities, with the
@@ -282,12 +284,12 @@ pub async fn graph(
     node_cap: i64,
 ) -> Result<(Vec<GraphNode>, Vec<GraphEdge>)> {
     let nodes = sqlx::query_as::<_, GraphNode>(
-        "SELECT e.id, e.kind, e.value, e.display_value, count(*)::bigint AS weight
+        "SELECT e.id, e.kind, e.value, e.display_value, count(*)::bigint AS weight, e.community_id
          FROM cluster_members m
          JOIN entity_mentions em ON em.chunk_id = m.chunk_id
          JOIN entities e ON e.id = em.entity_id
          WHERE m.cluster_id = $1
-         GROUP BY e.id, e.kind, e.value, e.display_value
+         GROUP BY e.id, e.kind, e.value, e.display_value, e.community_id
          ORDER BY weight DESC, e.id
          LIMIT $2",
     )

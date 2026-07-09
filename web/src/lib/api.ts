@@ -227,8 +227,22 @@ export const GraphNode = z.object({
   value: z.string(),
   display_value: z.string(),
   weight: z.number(),
+  community_id: z.number().nullable().optional(),
 });
 export type GraphNode = z.infer<typeof GraphNode>;
+
+export const Bridge = z.object({
+  a_id: z.string(),
+  a_kind: z.string(),
+  a_value: z.string(),
+  a_community: z.number(),
+  b_id: z.string(),
+  b_kind: z.string(),
+  b_value: z.string(),
+  b_community: z.number(),
+  strength: z.number(),
+});
+export type Bridge = z.infer<typeof Bridge>;
 
 export const GraphEdge = z.object({
   src_id: z.string(),
@@ -326,6 +340,8 @@ export const api = {
     const qs = p.toString();
     return request(`/v1/graph${qs ? `?${qs}` : ""}`, EntityGraph);
   },
+  bridges: (limit?: number) =>
+    request(`/v1/bridges${limit ? `?limit=${limit}` : ""}`, z.array(Bridge)),
 };
 
 // ---------------- live events (SSE) ------------------------------------------

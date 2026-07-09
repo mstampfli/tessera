@@ -322,7 +322,12 @@ pub async fn recorrelate(config: Config) -> Result<()> {
     )
     .await
     .map_err(|e| anyhow!(e.to_string()))?;
-    println!("recorrelated: {embedded} entity embeddings, {edges} semantic edges");
+    let communities = tessera_db::repos::communities::detect(&db.api)
+        .await
+        .map_err(|e| anyhow!(e.to_string()))?;
+    println!(
+        "recorrelated: {embedded} entity embeddings, {edges} semantic edges, {communities} communities"
+    );
     Ok(())
 }
 

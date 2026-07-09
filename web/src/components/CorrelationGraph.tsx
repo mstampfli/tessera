@@ -4,7 +4,13 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type Graph from "graphology";
 
-export type GraphNode = { id: string; label: string; kind: string; weight: number };
+export type GraphNode = {
+  id: string;
+  label: string;
+  kind: string;
+  weight: number;
+  community?: number | null;
+};
 // weight is the correlation strength in [0, 1]; method distinguishes a direct
 // co-occurrence from a semantic (contextual) similarity.
 export type GraphEdge = { source: string; target: string; weight: number; method?: string };
@@ -91,14 +97,28 @@ export function CorrelationGraph({
       const nodeColor = token("--mk-text-2", "#c7b299");
       const edgeColor = token("--mk-border-strong", "#5a4023");
       const semanticColor = token("--mk-clay-1", "#3c2a19");
+      const bridgeColor = token("--mk-highlight", "#eda43d");
       const dimColor = token("--mk-text-3", "#8d7456");
       const labelColor = token("--mk-text-1", "#f4ead9");
       const chipBg = token("--mk-surface-2", "#2b1e13");
       const bg = token("--mk-surface-1", "#221810");
 
+      // A small categorical palette for communities (maka's warm hues only).
+      const palette = [
+        token("--mk-orange-1", "#e0731d"),
+        token("--mk-green-1", "#8fa05a"),
+        token("--mk-amber-1", "#eda43d"),
+        token("--mk-red-1", "#d9503c"),
+        token("--mk-cream-2", "#c7b299"),
+        token("--mk-clay-2", "#5a4023"),
+      ];
+      const communityColor = (c: number | null | undefined) =>
+        c == null ? nodeColor : palette[((c % palette.length) + palette.length) % palette.length];
+
       const graph: Graph = new GraphCtor({ type: "undirected" });
       const maxNodeW = Math.max(1, ...nodes.map((n) => n.weight));
       const maxEdgeW = Math.max(1, ...edges.map((e) => e.weight));
+      const communityOf = new Map(nodes.map((n) => [n.id, n.community ?? null]));
 
       nodes.forEach((n, i) => {
         if (graph.hasNode(n.id)) return;
@@ -109,7 +129,7 @@ export function CorrelationGraph({
           x: isCenter ? 0 : Math.cos(angle) * 10,
           y: isCenter ? 0 : Math.sin(angle) * 10,
           size: isCenter ? 14 : 4 + (n.weight / maxNodeW) * 9,
-          color: isCenter ? accent : nodeColor,
+          color: isCenter ? accent : communityColor(n.community),
         });
       });
 
@@ -117,12 +137,16 @@ export function CorrelationGraph({
         if (e.source === e.target) return;
         if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) return;
         if (graph.hasEdge(e.source, e.target)) return;
-        // Thickness carries the strength; semantic (contextual) edges are drawn
-        // in a quieter colour so direct co-occurrence reads as the stronger link.
+        // A semantic edge across two communities is a bridge (a non-obvious link
+        // between things never stated together): draw it highlighted. Other
+        // semantic edges are quieter than direct co-occurrence.
         const semantic = e.method === "similar";
+        const ca = communityOf.get(e.source);
+        const cb = communityOf.get(e.target);
+        const bridge = semantic && ca != null && cb != null && ca !== cb;
         graph.addEdge(e.source, e.target, {
-          size: 0.5 + (e.weight / maxEdgeW) * 3.5,
-          color: semantic ? semanticColor : edgeColor,
+          size: (bridge ? 1.0 : 0.5) + (e.weight / maxEdgeW) * 3.5,
+          color: bridge ? bridgeColor : semantic ? semanticColor : edgeColor,
         });
       });
 
