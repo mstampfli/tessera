@@ -62,7 +62,7 @@ async fn recluster(ctx: &PipelineContext, _payload: &Value) -> Result<()> {
 /// run collapses a burst of ingestion), so it runs after correlation settles.
 async fn detect_communities(ctx: &PipelineContext, _payload: &Value) -> Result<()> {
     let pool = &ctx.db.worker;
-    let n = tessera_db::repos::communities::detect(pool, ctx.community_hub_degree).await?;
+    let n = tessera_db::repos::communities::detect(pool).await?;
     let _ = queue::notify(
         pool,
         &json!({ "type": "communities.detected", "communities": n }),

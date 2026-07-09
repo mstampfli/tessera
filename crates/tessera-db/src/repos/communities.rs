@@ -1,12 +1,15 @@
-//! Structural community detection over the entity graph, and the bridges between
+//! Community detection over the entity graph, and the bridges between
 //! communities.
 //!
-//! A community is a connected component of the *direct co-occurrence* graph:
-//! entities that are (transitively) mentioned together. It is deterministic and
-//! cheap (union-find), and it is the right base for bridge detection: a semantic
-//! `similar` edge whose endpoints fall in two different communities is a
-//! non-obvious link between things that are never stated together, which is
-//! exactly the kind of cross-domain correlation worth surfacing.
+//! Communities come from weighted Louvain modularity optimization on the
+//! co-occurrence graph, with edges weighted by idf-damped co-occurrence (rare
+//! shared entities count for more, ubiquitous ones for less). Modularity handles
+//! hubs by construction - a node connected to everything barely raises it, so it
+//! does not force merges - which is why this replaced the old connected-components
+//! (single-linkage) assignment that chained everything a hub touched into one
+//! blob. A semantic `similar` edge whose endpoints fall in two different
+//! communities is a bridge: a non-obvious link between things never stated
+//! together, which is exactly the cross-domain correlation worth surfacing.
 
 use std::collections::HashMap;
 
@@ -14,123 +17,58 @@ use sqlx::PgPool;
 use tessera_core::error::Result;
 use uuid::Uuid;
 
+use crate::louvain;
 use crate::map_sqlx;
 
-/// A disjoint-set (union-find) with path compression and union by size.
-struct UnionFind {
-    parent: HashMap<Uuid, Uuid>,
-    size: HashMap<Uuid, u32>,
-}
-
-impl UnionFind {
-    fn new() -> Self {
-        Self {
-            parent: HashMap::new(),
-            size: HashMap::new(),
-        }
-    }
-
-    fn add(&mut self, x: Uuid) {
-        self.parent.entry(x).or_insert(x);
-        self.size.entry(x).or_insert(1);
-    }
-
-    fn find(&mut self, x: Uuid) -> Uuid {
-        let mut root = x;
-        while self.parent[&root] != root {
-            root = self.parent[&root];
-        }
-        // Path compression.
-        let mut cur = x;
-        while cur != root {
-            let next = self.parent[&cur];
-            self.parent.insert(cur, root);
-            cur = next;
-        }
-        root
-    }
-
-    fn union(&mut self, a: Uuid, b: Uuid) {
-        let (ra, rb) = (self.find(a), self.find(b));
-        if ra == rb {
-            return;
-        }
-        let (big, small) = if self.size[&ra] >= self.size[&rb] {
-            (ra, rb)
-        } else {
-            (rb, ra)
-        };
-        self.parent.insert(small, big);
-        let s = self.size[&small];
-        *self.size.get_mut(&big).unwrap() += s;
-    }
-}
-
-/// Recompute every entity's `community_id` as the connected component of the
-/// co-occurrence graph it belongs to. Deterministic: components are numbered by
-/// their smallest member id, so ids are stable across runs given the same graph.
-/// Returns the number of distinct communities.
-pub async fn detect(pool: &PgPool, hub_max_degree: i64) -> Result<i64> {
-    let entity_ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM entities")
-        .fetch_all(pool)
-        .await
-        .map_err(map_sqlx)?;
-    if entity_ids.is_empty() {
-        return Ok(0);
-    }
-    let edges: Vec<(Uuid, Uuid)> =
-        sqlx::query_as("SELECT src_id, dst_id FROM entity_edges WHERE rel = 'co_occurs'")
+/// Recompute every entity's `community_id` by weighted Louvain over the
+/// idf-weighted co-occurrence graph. Returns the number of communities.
+pub async fn detect(pool: &PgPool) -> Result<i64> {
+    // Entity id -> dense index, plus mention counts for idf.
+    let ents: Vec<(Uuid, i64)> =
+        sqlx::query_as("SELECT id, mention_count FROM entities ORDER BY id")
             .fetch_all(pool)
             .await
             .map_err(map_sqlx)?;
-
-    // Hub guard: an entity that co-occurs with a huge number of others (a generic
-    // date, a ubiquitous tool name) would otherwise chain every community into one
-    // blob. Above `hub_max_degree` it is not allowed to merge communities, so the
-    // structure stays meaningful. A non-positive cap disables the guard.
-    let mut degree: HashMap<Uuid, i64> = HashMap::new();
-    for (a, b) in &edges {
-        *degree.entry(*a).or_insert(0) += 1;
-        *degree.entry(*b).or_insert(0) += 1;
+    if ents.is_empty() {
+        return Ok(0);
     }
-    let is_hub =
-        |id: &Uuid| hub_max_degree > 0 && degree.get(id).copied().unwrap_or(0) > hub_max_degree;
+    let total_chunks: i64 = sqlx::query_scalar("SELECT GREATEST(count(*), 1) FROM chunks")
+        .fetch_one(pool)
+        .await
+        .map_err(map_sqlx)?;
+    let n_docs = total_chunks as f64;
 
-    let mut uf = UnionFind::new();
-    for id in &entity_ids {
-        uf.add(*id);
-    }
-    for (a, b) in &edges {
-        uf.add(*a);
-        uf.add(*b);
-        if is_hub(a) || is_hub(b) {
-            continue;
-        }
-        uf.union(*a, *b);
+    let mut index: HashMap<Uuid, usize> = HashMap::with_capacity(ents.len());
+    let mut idf: Vec<f64> = Vec::with_capacity(ents.len());
+    for (i, (id, mc)) in ents.iter().enumerate() {
+        index.insert(*id, i);
+        idf.push((1.0 + n_docs / (*mc).max(1) as f64).ln());
     }
 
-    // Number components deterministically by their smallest member id.
-    let mut smallest: HashMap<Uuid, Uuid> = HashMap::new();
-    for id in &entity_ids {
-        let root = uf.find(*id);
-        let entry = smallest.entry(root).or_insert(*id);
-        if *id < *entry {
-            *entry = *id;
-        }
-    }
-    let mut number: HashMap<Uuid, i32> = HashMap::new();
-    let mut roots: Vec<Uuid> = smallest.keys().copied().collect();
-    roots.sort_unstable_by_key(|r| smallest[r]);
-    for (i, r) in roots.iter().enumerate() {
-        number.insert(*r, i32::try_from(i).unwrap_or(i32::MAX));
-    }
+    let raw: Vec<(Uuid, Uuid, i32)> = sqlx::query_as(
+        "SELECT src_id, dst_id, source_count FROM entity_edges WHERE rel = 'co_occurs'",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)?;
 
-    let mut ids = Vec::with_capacity(entity_ids.len());
-    let mut cids = Vec::with_capacity(entity_ids.len());
-    for id in &entity_ids {
-        ids.push(*id);
-        cids.push(number[&uf.find(*id)]);
-    }
+    // Edge weight = shared-chunk count damped by the rarity of both endpoints, so
+    // a hub pair (both common, low idf) weighs little and rare pairs weigh a lot.
+    let edges: Vec<(usize, usize, f64)> = raw
+        .iter()
+        .filter_map(|(a, b, sc)| {
+            let (ia, ib) = (*index.get(a)?, *index.get(b)?);
+            let w = f64::from(*sc) * (idf[ia] * idf[ib]).sqrt();
+            Some((ia, ib, w))
+        })
+        .collect();
+
+    let labels = louvain::communities(ents.len(), &edges);
+    let ids: Vec<Uuid> = ents.iter().map(|(id, _)| *id).collect();
+    let cids: Vec<i32> = labels
+        .iter()
+        .map(|&c| i32::try_from(c).unwrap_or(i32::MAX))
+        .collect();
 
     sqlx::query(
         "UPDATE entities e SET community_id = d.cid
@@ -143,7 +81,8 @@ pub async fn detect(pool: &PgPool, hub_max_degree: i64) -> Result<i64> {
     .await
     .map_err(map_sqlx)?;
 
-    Ok(i64::try_from(roots.len()).unwrap_or(i64::MAX))
+    let k = labels.iter().copied().max().map_or(0, |m| m + 1);
+    Ok(i64::try_from(k).unwrap_or(i64::MAX))
 }
 
 /// A bridge: a semantic (`similar`) edge whose endpoints lie in different

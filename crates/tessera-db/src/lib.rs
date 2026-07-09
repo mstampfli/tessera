@@ -6,6 +6,7 @@
 //! second pool costs nothing until the pipeline (M1) starts using it.
 
 pub mod cas;
+pub mod louvain;
 pub mod queue;
 pub mod repos;
 
