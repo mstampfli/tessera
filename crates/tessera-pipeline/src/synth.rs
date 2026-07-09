@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use serde::Deserialize;
 use tessera_core::error::{Error, ErrorKind, Result};
 use tessera_db::repos::clusters::MemberChunk;
-use tessera_providers::{GenRequest, LlmProvider};
+use tessera_providers::{generate_json, GenRequest, LlmProvider};
 
 const SYSTEM: &str = "You are a security intelligence analyst. You are given a group of related \
 excerpts that an algorithm has already clustered together, and the notable entities in them. \
@@ -49,58 +49,40 @@ pub struct Synthesized {
 
 const ALLOWED_SEVERITY: [&str; 5] = ["info", "low", "medium", "high", "critical"];
 
-/// Synthesize an insight over a cluster's representative chunks. Retries once if
-/// the model does not return parseable JSON.
+/// Synthesize an insight over a cluster's representative chunks. The JSON parse
+/// (and its one retry) is handled by the `generate_json` primitive; this function
+/// owns the domain validation of the result.
 pub async fn synthesize(
     llm: &std::sync::Arc<dyn LlmProvider>,
     chunks: &[MemberChunk],
     entities: &[(String, String)],
 ) -> Result<Synthesized> {
-    let prompt = build_prompt(chunks, entities);
+    let req = GenRequest {
+        prompt: build_prompt(chunks, entities),
+        system: Some(SYSTEM.to_string()),
+        max_tokens: Some(700),
+    };
+    let (raw, model): (RawInsight, String) = generate_json(llm.as_ref(), &req)
+        .await
+        .map_err(|e| Error::new(ErrorKind::Provider, format!("insight synthesis: {e}")))?;
 
-    let mut last_err = String::new();
-    for attempt in 0..2 {
-        let system = if attempt == 0 {
-            SYSTEM.to_string()
-        } else {
-            format!("{SYSTEM}\nYour previous reply was not valid JSON. Reply with JSON only.")
-        };
-        let resp = llm
-            .generate(&GenRequest {
-                prompt: prompt.clone(),
-                system: Some(system),
-                max_tokens: Some(700),
-            })
-            .await
-            .map_err(|e| Error::new(ErrorKind::Provider, format!("synthesis generation: {e}")))?;
-
-        match parse(&resp.text) {
-            Ok(raw) => {
-                let severity = if ALLOWED_SEVERITY.contains(&raw.severity.as_str()) {
-                    raw.severity
-                } else {
-                    "medium".to_string()
-                };
-                let cited: Vec<usize> = referenced_markers(&raw.narrative, chunks.len())
-                    .into_iter()
-                    .collect();
-                return Ok(Synthesized {
-                    title: raw.title.trim().to_string(),
-                    narrative: raw.narrative.trim().to_string(),
-                    severity,
-                    confidence: raw.confidence.clamp(0.0, 1.0),
-                    suggested_actions: raw.suggested_actions,
-                    cited,
-                    model: resp.model,
-                });
-            }
-            Err(e) => last_err = e,
-        }
-    }
-    Err(Error::new(
-        ErrorKind::Provider,
-        format!("could not parse insight JSON: {last_err}"),
-    ))
+    let severity = if ALLOWED_SEVERITY.contains(&raw.severity.as_str()) {
+        raw.severity
+    } else {
+        "medium".to_string()
+    };
+    let cited: Vec<usize> = referenced_markers(&raw.narrative, chunks.len())
+        .into_iter()
+        .collect();
+    Ok(Synthesized {
+        title: raw.title.trim().to_string(),
+        narrative: raw.narrative.trim().to_string(),
+        severity,
+        confidence: raw.confidence.clamp(0.0, 1.0),
+        suggested_actions: raw.suggested_actions,
+        cited,
+        model,
+    })
 }
 
 fn build_prompt(chunks: &[MemberChunk], entities: &[(String, String)]) -> String {
@@ -125,17 +107,6 @@ fn build_prompt(chunks: &[MemberChunk], entities: &[(String, String)]) -> String
         "Notable entities in this group: {ent_list}\n\nExcerpts:\n{ctx}\n\
          Write the JSON insight now."
     )
-}
-
-/// Extract the outermost JSON object from the model text (models sometimes wrap
-/// it in prose or markdown fences) and parse it.
-fn parse(text: &str) -> std::result::Result<RawInsight, String> {
-    let start = text.find('{').ok_or("no JSON object found")?;
-    let end = text.rfind('}').ok_or("no closing brace")?;
-    if end <= start {
-        return Err("malformed JSON bounds".into());
-    }
-    serde_json::from_str::<RawInsight>(&text[start..=end]).map_err(|e| e.to_string())
 }
 
 /// Distinct `[E<number>]` markers within `[1, max]` that the narrative cites.
@@ -166,15 +137,7 @@ fn referenced_markers(narrative: &str, max: usize) -> BTreeSet<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, referenced_markers};
-
-    #[test]
-    fn parses_json_wrapped_in_prose() {
-        let text = "Sure! Here is the insight:\n```json\n{\"title\":\"t\",\"narrative\":\"n [E1]\",\"severity\":\"high\",\"confidence\":0.8,\"suggested_actions\":[\"block it\"]}\n```\nDone.";
-        let raw = parse(text).expect("parses");
-        assert_eq!(raw.title, "t");
-        assert_eq!(raw.severity, "high");
-    }
+    use super::referenced_markers;
 
     #[test]
     fn markers_are_bounded_and_deduped() {

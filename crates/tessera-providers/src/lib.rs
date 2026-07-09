@@ -15,9 +15,11 @@ pub mod chain;
 pub mod claude_cli;
 #[cfg(feature = "fastembed")]
 pub mod fastembed_embedder;
+pub mod json;
 pub mod ollama;
 
 pub use build::{build_embedder, build_llm};
+pub use json::generate_json;
 
 use async_trait::async_trait;
 

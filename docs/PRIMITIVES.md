@@ -105,6 +105,22 @@ to its HTTP status.
 Instead of: `anyhow`/stringly-typed errors across crate boundaries, or ad-hoc
 status mapping in a handler.
 
+## LLM JSON (tessera-providers, `json.rs`)
+
+### `generate_json<T>` -> `(T, model)`
+The one way to get a typed JSON value out of a model. It owns the fragile
+mechanics every caller would otherwise re-derive: models routinely wrap the
+object in prose or ``` fences, so it slices the outermost `{...}` before
+deserializing, and it retries once (with a corrective instruction appended to the
+system prompt) if the first reply does not parse. Only a parse failure is
+retried; a provider/transport error propagates immediately, because backend
+failover is the chain's job. Returns the value plus the model id that produced it.
+Instead of: hand-rolling the extract-JSON-from-prose and retry-once loop at each
+call site.
+It is NOT a schema validator: the caller keeps its own prompt (which describes the
+fields) and its own semantic validation of the parsed values (enum membership,
+numeric ranges).
+
 ## Enforced by convention (not a dedicated type)
 
 Some concerns are held by convention rather than a wrapper type. They work, but
@@ -126,18 +142,18 @@ Writing this catalog was an audit. The design plan called for these as named,
 tested primitives; the current code inlines or skips them. Recorded here so they
 are not mistaken for done, and tracked for a follow-up pass:
 
-1. **No shared `generate_json<T>` LLM-JSON helper.** The plan wanted one primitive
-   that renders a schema into the prompt, validates the response, and retries
-   once, reused by every JSON-returning model call. Instead
-   `tessera-pipeline/src/synth.rs` hand-rolls its own extract-JSON-from-prose
-   `parse()` and retry loop, and the ask path parses separately. The two paths
-   can drift. (No `schemars`/`JsonSchema` is wired into the workspace.)
-2. **Ingestion buffers rather than streams.** `CasStore::write_bytes` takes a full
+1. **Ingestion buffers rather than streams.** `CasStore::write_bytes` takes a full
    `&[u8]`, and multipart upload reads the whole field with `field.bytes()`,
    whereas the plan specified streaming into the CAS while hashing. It is bounded
    by the 64 MiB global body cap, so it is safe, just not the streaming design.
-3. **No `clean_text` or bounded-reader primitives, and no write-side dim check.**
+2. **No `clean_text` or bounded-reader primitives, and no write-side dim check.**
    Text cleaning is inline `from_utf8_lossy`, bounding is ad-hoc `.take(N)`, and
    `embeddings::insert_batch` accepts vectors without checking their length
    against `space.dim` (a wrong-dimension vector fails later at index or query
    time, not at the write).
+
+(The plan's third gap, a shared `generate_json<T>` LLM-JSON helper, is now built;
+see the LLM JSON section above. It landed as a lean typed-parse-plus-retry
+primitive over the caller's own prompt, rather than the plan's schema-in-prompt
+design, because a hand-tuned domain prompt guides a small local model better than
+a rendered JSON schema would.)
