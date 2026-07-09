@@ -245,8 +245,15 @@ fn scalar_text(value: &Value) -> String {
         Value::String(s) => s.clone(),
         Value::Null => "null".to_string(),
         Value::Bool(_) | Value::Number(_) => value.to_string(),
-        // Nested composites: compact JSON keeps them searchable without noise.
-        _ => serde_json::to_string(value).unwrap_or_default(),
+        // Nested objects/arrays render as readable `key=value` text rather than
+        // raw JSON, so an ingested record reads as prose in search results and
+        // evidence while staying just as searchable (the values are still there).
+        Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| format!("{k}={}", scalar_text(v)))
+            .collect::<Vec<_>>()
+            .join(", "),
+        Value::Array(items) => items.iter().map(scalar_text).collect::<Vec<_>>().join(", "),
     }
 }
 
@@ -312,5 +319,20 @@ mod tests {
             label: "pdf".into(),
         };
         assert!(normalize(b"%PDF-1.4", &sniffed).is_err());
+    }
+
+    #[test]
+    fn nested_json_renders_readably() {
+        // A record with nested objects (like a quarry finding) renders as
+        // readable text, not embedded JSON.
+        let p = norm(
+            br#"{"probe":"dns","entity":{"kind":"ip","value":"1.2.3.4"},"seed":{"kind":"domain","value":"x.com"}}"#,
+        );
+        let text = &p.chunks[0].text;
+        assert!(text.contains("kind=ip"), "got: {text}");
+        assert!(text.contains("value=1.2.3.4"), "got: {text}");
+        assert!(!text.contains('{'), "raw JSON braces leaked: {text}");
+        // Still searchable: the IP and domain survive verbatim.
+        assert!(text.contains("1.2.3.4") && text.contains("x.com"));
     }
 }
