@@ -16,8 +16,9 @@ writes through. No business logic lives here, only persistence.
   for background jobs, so bulk work cannot starve the API), `migrate`, the
   `listen` LISTEN/NOTIFY bridge, and `map_sqlx` (classifies a unique violation as
   a `Conflict`, a missing row as `NotFound`).
-- `cas.rs` - `CasStore`: writes raw bytes under their blake3 hash and re-verifies
-  the hash on read (`read_verified`).
+- `cas.rs` - `CasStore`: writes raw bytes under their blake3 hash (in memory via
+  `write_bytes`, or streamed and size-capped via `write_streaming`) and
+  re-verifies the hash on read (`read_verified`).
 - `queue.rs` - the Postgres job queue: `enqueue` (transactional with the data
   write), `claim` (SKIP LOCKED + lease), `heartbeat`, `complete`, `fail` (with
   backoff), `reap_expired`, `depth`, `notify`.

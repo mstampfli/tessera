@@ -10,11 +10,13 @@ use axum::routing::post;
 use axum::{Json, Router};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
+use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tessera_core::error::{Error, ErrorKind};
 use tessera_db::queue;
 use tessera_db::repos::sources;
+use tokio_util::io::StreamReader;
 use uuid::Uuid;
 
 use crate::auth::{AuthContext, Scope};
@@ -300,23 +302,29 @@ async fn ingest_upload(
     {
         let filename = field.file_name().map(ToString::to_string);
         let content_type = field.content_type().map(ToString::to_string);
-        let data = field.bytes().await.map_err(|e| {
-            ApiError(Error::new(
-                ErrorKind::Invalid,
-                format!("multipart field: {e}"),
-            ))
-        })?;
 
-        let item = IngestItem {
-            content: None,
-            content_base64: Some(BASE64.encode(&data)),
-            media_type: content_type,
-            title: filename.clone(),
+        // Stream the field straight into the content store (hashing as it goes),
+        // so a large upload is never buffered whole in memory.
+        let reader = StreamReader::new(
+            field.map(|res| res.map_err(|e| std::io::Error::other(e.to_string()))),
+        );
+        let item = tessera_pipeline::IngestStream {
+            source_id,
+            media_type_hint: content_type.as_deref(),
+            title: filename.as_deref(),
             uri: None,
-            meta: Some(json!({ "filename": filename })),
+            meta: json!({ "filename": filename }),
             event_time: None,
         };
-        match ingest_one(&state, source_id, &item).await {
+        match tessera_pipeline::ingest_stream(
+            &state.db,
+            &state.cas,
+            reader,
+            item,
+            MAX_ITEM_BYTES as u64,
+        )
+        .await
+        {
             Ok(r) => {
                 if r.deduped {
                     deduped += 1;

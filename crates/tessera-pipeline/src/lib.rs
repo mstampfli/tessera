@@ -13,7 +13,7 @@ mod synth;
 mod worker;
 
 pub use context::PipelineContext;
-pub use ingest::{ingest_bytes, IngestBytes, Ingested};
+pub use ingest::{ingest_bytes, ingest_stream, IngestBytes, IngestStream, Ingested};
 pub use worker::{run_pipeline, PipelineHandle};
 
 /// Job kind: normalize + chunk a freshly ingested document, then fan out

@@ -13,6 +13,12 @@ the ingestion idempotency key, so identical bytes ingested twice converge on one
 object. `of`, `from_slice`, `as_bytes`, `to_hex`.
 Instead of: hashing ad hoc, or keying stored content by filename or a fresh uuid.
 
+### `ContentHasher` (tessera-core, `hash.rs`)
+The streaming twin of `ContentHash::of`: fold content in with `update` and
+`finalize` to a `ContentHash`. Feeding the same bytes in any chunking yields the
+same hash as the one-shot call, so a stream can be hashed without buffering it.
+Instead of: buffering a whole upload just to hash it.
+
 ### `new_id()` (tessera-core, `ids.rs`)
 A uuidv7: time-ordered, so ids sort by creation time and support keyset
 pagination without a separate timestamp column.
@@ -47,9 +53,17 @@ Instead of: any fast hash for passwords.
 ## Content-addressed store (tessera-db, `cas.rs`)
 
 ### `CasStore::write_bytes` -> `(ContentHash, len)`
-Hashes the bytes, writes to a unique temp file, and atomically renames into the
-hash-sharded path. A concurrent writer of the same content is a safe no-op.
+Hashes bytes already in memory, writes to a unique temp file, and atomically
+renames into the hash-sharded path. A concurrent writer of the same content is a
+safe no-op.
 Instead of: writing ingested bytes to a chosen path.
+
+### `CasStore::write_streaming` -> `Stored`
+Streams content from an `AsyncRead`, hashing while writing so the whole body is
+never buffered, and aborts with `TooLarge` past a byte cap. Returns the hash, the
+size, and the first bytes (for the caller to sniff without a re-read). This is
+also the bounded read of untrusted upload input: the cap is enforced here, once.
+Instead of: reading a whole upload into memory (`field.bytes()`) before storing.
 
 ### `CasStore::read_verified`
 Re-hashes the bytes on read and hard-errors if they no longer match the key
@@ -142,18 +156,17 @@ Writing this catalog was an audit. The design plan called for these as named,
 tested primitives; the current code inlines or skips them. Recorded here so they
 are not mistaken for done, and tracked for a follow-up pass:
 
-1. **Ingestion buffers rather than streams.** `CasStore::write_bytes` takes a full
-   `&[u8]`, and multipart upload reads the whole field with `field.bytes()`,
-   whereas the plan specified streaming into the CAS while hashing. It is bounded
-   by the 64 MiB global body cap, so it is safe, just not the streaming design.
-2. **No `clean_text` or bounded-reader primitives, and no write-side dim check.**
+1. **No `clean_text` or bounded-reader primitives, and no write-side dim check.**
    Text cleaning is inline `from_utf8_lossy`, bounding is ad-hoc `.take(N)`, and
    `embeddings::insert_batch` accepts vectors without checking their length
    against `space.dim` (a wrong-dimension vector fails later at index or query
    time, not at the write).
 
-(The plan's third gap, a shared `generate_json<T>` LLM-JSON helper, is now built;
-see the LLM JSON section above. It landed as a lean typed-parse-plus-retry
-primitive over the caller's own prompt, rather than the plan's schema-in-prompt
-design, because a hand-tuned domain prompt guides a small local model better than
-a rendered JSON schema would.)
+(Two of the plan's gaps are now closed. The shared `generate_json<T>` LLM-JSON
+helper is built as a lean typed-parse-plus-retry primitive over the caller's own
+prompt, rather than the plan's schema-in-prompt design, because a hand-tuned
+domain prompt guides a small local model better than a rendered JSON schema
+would. Streaming ingestion is built: `CasStore::write_streaming` plus
+`ingest_stream` stream an upload into the store without buffering it, and the
+bounded read of untrusted input is the cap enforced there. See the sections
+above.)

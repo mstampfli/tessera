@@ -41,9 +41,33 @@ impl ContentHash {
     }
 }
 
+/// Incremental content hasher: the streaming twin of [`ContentHash::of`], for
+/// content read in chunks (e.g. an upload) so the whole body is never buffered.
+/// Feeding the same bytes here, in any chunking, yields the same hash as `of`.
+#[derive(Default)]
+pub struct ContentHasher(blake3::Hasher);
+
+impl ContentHasher {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fold the next slice of content into the digest.
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    /// Finalize into a [`ContentHash`]. Does not consume the hasher.
+    #[must_use]
+    pub fn finalize(&self) -> ContentHash {
+        ContentHash(*self.0.finalize().as_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ContentHash;
+    use super::{ContentHash, ContentHasher};
 
     #[test]
     fn hash_is_stable_and_roundtrips() {
@@ -57,5 +81,20 @@ mod tests {
         let restored = ContentHash::from_slice(a.as_bytes()).unwrap();
         assert_eq!(a, restored);
         assert!(ContentHash::from_slice(b"too short").is_err());
+    }
+
+    #[test]
+    fn incremental_matches_oneshot_regardless_of_chunking() {
+        let data = b"the quick brown fox jumps over the lazy dog";
+        let oneshot = ContentHash::of(data);
+
+        let mut h = ContentHasher::new();
+        h.update(&data[..5]);
+        h.update(&data[5..20]);
+        h.update(&data[20..]);
+        assert_eq!(h.finalize(), oneshot);
+
+        // Empty content still matches.
+        assert_eq!(ContentHasher::new().finalize(), ContentHash::of(b""));
     }
 }
