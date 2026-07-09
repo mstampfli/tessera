@@ -17,9 +17,11 @@ objectively. An algorithm has already grouped these excerpts; say what they are 
 relate. Records co-occurring, or sharing infrastructure, a hosting provider, a CDN, or a \
 certificate authority, is NOT evidence of an attack, intent, or compromise; do not infer one. \
 These are records the operator collected about their own or authorized targets, not detections \
-of an adversary. The context includes a SECURITY SIGNAL line: discuss a security concern, and \
-raise severity above 'info', ONLY when that line lists concrete indicators; if it says none, \
-stay neutral and set severity to 'info' with no alarmist actions. \
+of an adversary. The context begins with a PROVENANCE line saying where the records came from; \
+follow its guidance on how to frame the insight and what kind of suggested_actions to give. It \
+also includes a SECURITY SIGNAL line: discuss a security concern, and raise severity above \
+'info', ONLY when that line lists concrete indicators; if it says none, stay neutral and set \
+severity to 'info' with no alarmist actions. \
 Respond with STRICT JSON only, no prose outside the JSON, with exactly these fields: \
 title (string, short), narrative (string; cite supporting excerpts inline as [E1], [E2], etc; \
 every claim must have a citation and you may only use the E-numbers provided), \
@@ -61,9 +63,10 @@ pub async fn synthesize(
     llm: &std::sync::Arc<dyn LlmProvider>,
     chunks: &[MemberChunk],
     entities: &[(String, String)],
+    collected: bool,
 ) -> Result<Synthesized> {
     let req = GenRequest {
-        prompt: build_prompt(chunks, entities),
+        prompt: build_prompt(chunks, entities, collected),
         system: Some(SYSTEM.to_string()),
         max_tokens: Some(700),
     };
@@ -86,7 +89,7 @@ pub async fn synthesize(
     })
 }
 
-fn build_prompt(chunks: &[MemberChunk], entities: &[(String, String)]) -> String {
+fn build_prompt(chunks: &[MemberChunk], entities: &[(String, String)], collected: bool) -> String {
     use std::fmt::Write as _;
     let mut ctx = String::new();
     for (i, c) in chunks.iter().enumerate() {
@@ -105,10 +108,26 @@ fn build_prompt(chunks: &[MemberChunk], entities: &[(String, String)]) -> String
             .join(", ")
     };
     format!(
-        "Security signal: {}\n\nNotable entities in this group: {ent_list}\n\nExcerpts:\n{ctx}\n\
-         Write the JSON insight now.",
-        security_signal(entities)
+        "Provenance: {}\nSecurity signal: {}\n\nNotable entities in this group: {ent_list}\n\n\
+         Excerpts:\n{ctx}\nWrite the JSON insight now.",
+        provenance_line(collected),
+        security_signal(entities),
     )
+}
+
+/// The provenance line surfaced to the model. Self-collected material is our own
+/// OSINT/reference, not external activity - so the insight should summarize what
+/// the sources SAY and suggest what to investigate next, never defend or moderate.
+fn provenance_line(collected: bool) -> &'static str {
+    if collected {
+        "this material is OSINT you collected yourself (your own queries and fetched \
+         sources), not external activity or an incoming report. Summarize what the sources \
+         actually say about the subject; suggested_actions must be investigative next steps \
+         (what to look into, corroborate, or pull next), never defensive or content-moderation \
+         actions."
+    } else {
+        "unspecified."
+    }
 }
 
 /// The deterministic security signal for a group, computed from its own entities.
@@ -221,5 +240,18 @@ mod tests {
     fn harm_signal_honors_model_severity_but_degrades_invalid_to_low() {
         assert_eq!(normalize_severity("high", true), "high");
         assert_eq!(normalize_severity("nonsense", true), "low");
+    }
+
+    #[test]
+    fn self_collected_provenance_asks_to_summarize_not_police() {
+        let collected = super::provenance_line(true);
+        assert!(collected.contains("collected yourself"));
+        assert!(collected.contains("investigative"));
+        assert!(collected.contains("never defensive or content-moderation"));
+        assert_eq!(super::provenance_line(false), "unspecified.");
+        // The provenance guidance actually reaches the built prompt.
+        let prompt = super::build_prompt(&[], &[], true);
+        assert!(prompt.contains("Provenance:"));
+        assert!(prompt.contains("investigative next steps"));
     }
 }

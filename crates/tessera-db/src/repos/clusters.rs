@@ -229,6 +229,25 @@ pub async fn representative_chunks(
     .map_err(map_sqlx)
 }
 
+/// Whether this cluster's evidence is predominantly self-collected (its documents
+/// carry a `collected` marker in `meta`, e.g. quarry-ingested OSINT). Synthesis
+/// uses this to frame the insight as our own gathered reference material - describe
+/// what the sources say, suggest investigative next steps - rather than as external
+/// activity to defend against or content to police.
+pub async fn is_self_collected(pool: &PgPool, cluster_id: Uuid) -> Result<bool> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT coalesce(avg((jsonb_exists(d.meta, 'collected') OR jsonb_exists(d.meta, 'quarry'))::int) >= 0.5, false)
+         FROM cluster_members m
+         JOIN chunks c ON c.id = m.chunk_id
+         JOIN documents d ON d.id = c.document_id
+         WHERE m.cluster_id = $1",
+    )
+    .bind(cluster_id)
+    .fetch_one(pool)
+    .await
+    .map_err(map_sqlx)
+}
+
 /// Reset a cluster's dirty counter (after synthesizing an insight for it).
 pub async fn reset_dirty(pool: &PgPool, id: Uuid) -> Result<()> {
     sqlx::query("UPDATE clusters SET dirty_count = 0 WHERE id = $1")

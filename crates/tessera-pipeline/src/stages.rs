@@ -572,7 +572,8 @@ async fn synthesize_insight(ctx: &PipelineContext, payload: &Value) -> Result<()
         return Ok(());
     }
 
-    let synth = synth::synthesize(&ctx.llm, &reps, &entities).await?;
+    let collected = clusters::is_self_collected(pool, cluster_id).await?;
+    let synth = synth::synthesize(&ctx.llm, &reps, &entities, collected).await?;
 
     // Evidence comes from the cited context items; the citation leash means only
     // resolving markers count. If the model cited nothing, fall back to the most
