@@ -19,7 +19,7 @@ export type GraphEdge = { source: string; target: string; weight: number; method
 type SigmaLike = {
   kill: () => void;
   refresh: () => void;
-  on: (event: string, cb: (payload: { node: string }) => void) => void;
+  on: (event: string, cb: (payload: { node: string; edge: string }) => void) => void;
   setSetting: (key: string, value: unknown) => void;
 };
 type NodeData = { color?: string; size?: number; label?: string; zIndex?: number };
@@ -46,6 +46,7 @@ export function CorrelationGraph({
   centerId,
   selectedId,
   onSelectNode,
+  onSelectEdge,
   height = 440,
   ariaLabel,
 }: {
@@ -54,10 +55,15 @@ export function CorrelationGraph({
   centerId?: string;
   selectedId?: string;
   onSelectNode?: (id: string | null) => void;
+  onSelectEdge?: (a: string, b: string) => void;
   height?: number;
   ariaLabel: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const mouseRef = useRef({ x: 0, y: 0 });
+  const onSelectEdgeRef = useRef(onSelectEdge);
+  onSelectEdgeRef.current = onSelectEdge;
   const router = useRouter();
   const sigmaRef = useRef<SigmaLike | null>(null);
   const hoveredRef = useRef<string | null>(null);
@@ -156,6 +162,8 @@ export function CorrelationGraph({
         graph.addEdge(e.source, e.target, {
           size: (bridge ? 1.0 : 0.5) + (e.weight / maxEdgeW) * 3.5,
           color,
+          method: bridge ? "bridge" : (e.method ?? "co_occurs"),
+          strength: e.weight,
         });
       });
 
@@ -243,6 +251,32 @@ export function CorrelationGraph({
         onSelectRef.current?.(null);
       });
 
+      // Edge interaction: hover shows a small tooltip with the method + strength;
+      // click asks the parent to explain the correlation in full.
+      const label = (n: string) => String(graph.getNodeAttribute(n, "label") ?? n);
+      const pct = (s: unknown) => Math.round((typeof s === "number" ? s : 0) * 100);
+      sigma.on("enterEdge", ({ edge }: { edge: string }) => {
+        const [s, t] = graph.extremities(edge);
+        const method = String(graph.getEdgeAttribute(edge, "method"));
+        const strength = graph.getEdgeAttribute(edge, "strength");
+        const tip = tooltipRef.current;
+        if (tip) {
+          tip.textContent = `${method} ${pct(strength)}  ·  ${label(s)} — ${label(t)}`;
+          tip.style.left = `${mouseRef.current.x + 12}px`;
+          tip.style.top = `${mouseRef.current.y + 12}px`;
+          tip.style.display = "block";
+        }
+        container.style.cursor = "pointer";
+      });
+      sigma.on("leaveEdge", () => {
+        if (tooltipRef.current) tooltipRef.current.style.display = "none";
+        container.style.cursor = "grab";
+      });
+      sigma.on("clickEdge", ({ edge }: { edge: string }) => {
+        const [s, t] = graph.extremities(edge);
+        onSelectEdgeRef.current?.(s, t);
+      });
+
       container.style.background = bg;
     })();
 
@@ -268,11 +302,30 @@ export function CorrelationGraph({
 
   return (
     <div
-      ref={containerRef}
-      className="mt-2 w-full overflow-hidden rounded"
-      style={{ height, border: "1px solid var(--mk-border)", cursor: "grab" }}
-      role="img"
-      aria-label={ariaLabel}
-    />
+      className="relative mt-2 w-full"
+      onMouseMove={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        mouseRef.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+      }}
+    >
+      <div
+        ref={containerRef}
+        className="w-full overflow-hidden rounded"
+        style={{ height, border: "1px solid var(--mk-border)", cursor: "grab" }}
+        role="img"
+        aria-label={ariaLabel}
+      />
+      <div
+        ref={tooltipRef}
+        className="pointer-events-none absolute z-10 rounded px-2 py-1 font-mono text-[11px]"
+        style={{
+          display: "none",
+          background: "var(--mk-surface-2)",
+          color: "var(--mk-text-1)",
+          border: "1px solid var(--mk-border)",
+          boxShadow: "var(--mk-shadow-pop)",
+        }}
+      />
+    </div>
   );
 }

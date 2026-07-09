@@ -201,6 +201,85 @@ pub async fn add_similar_edges(
 /// The relation name for a temporal-proximity edge.
 pub const REL_TEMPORAL: &str = "temporal";
 
+/// One correlation method between a pair of entities, with its strength.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PairLink {
+    pub method: String,
+    pub strength: f64,
+}
+
+/// A chunk offered as evidence for why two entities correlate.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct EvidenceChunk {
+    pub chunk_id: Uuid,
+    pub document_id: Uuid,
+    pub title: Option<String>,
+    pub excerpt: String,
+    pub event_time: Option<DateTime<Utc>>,
+}
+
+/// The methods (`co_occurs` / `similar` / `temporal`) linking two entities, with
+/// each strength, strongest first.
+pub async fn pair_links(pool: &PgPool, a: Uuid, b: Uuid) -> Result<Vec<PairLink>> {
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    sqlx::query_as::<_, PairLink>(&format!(
+        "SELECT edge.rel AS method, ({EDGE_STRENGTH_SQL})::float8 AS strength
+         FROM entity_edges edge
+         WHERE edge.src_id = $1 AND edge.dst_id = $2
+         ORDER BY strength DESC",
+    ))
+    .bind(lo)
+    .bind(hi)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)
+}
+
+/// Chunks that mention BOTH entities: the literal shared context (the sentence)
+/// behind a co-occurrence.
+pub async fn shared_chunks(
+    pool: &PgPool,
+    a: Uuid,
+    b: Uuid,
+    limit: i64,
+) -> Result<Vec<EvidenceChunk>> {
+    sqlx::query_as::<_, EvidenceChunk>(
+        "SELECT c.id AS chunk_id, c.document_id, d.title,
+                left(c.text, 300) AS excerpt, d.event_time
+         FROM chunks c
+         JOIN entity_mentions ma ON ma.chunk_id = c.id AND ma.entity_id = $1
+         JOIN entity_mentions mb ON mb.chunk_id = c.id AND mb.entity_id = $2
+         JOIN documents d ON d.id = c.document_id
+         GROUP BY c.id, c.document_id, d.title, d.event_time
+         LIMIT $3",
+    )
+    .bind(a)
+    .bind(b)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx)
+}
+
+/// One representative mention of an entity (a sentence it appears in), so a
+/// semantic or temporal link can still be grounded in real text.
+pub async fn sample_mention(pool: &PgPool, entity_id: Uuid) -> Result<Option<EvidenceChunk>> {
+    sqlx::query_as::<_, EvidenceChunk>(
+        "SELECT c.id AS chunk_id, c.document_id, d.title,
+                left(c.text, 300) AS excerpt, d.event_time
+         FROM entity_mentions m
+         JOIN chunks c ON c.id = m.chunk_id
+         JOIN documents d ON d.id = c.document_id
+         WHERE m.entity_id = $1
+         ORDER BY c.id
+         LIMIT 1",
+    )
+    .bind(entity_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(map_sqlx)
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct TemporalNeighbor {
     id: Uuid,

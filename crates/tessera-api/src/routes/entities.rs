@@ -20,6 +20,7 @@ pub fn router() -> Router<AppState> {
         .route("/entities/{id}/neighborhood", get(neighborhood))
         .route("/graph", get(graph))
         .route("/bridges", get(bridges))
+        .route("/correlation", get(correlation))
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,6 +229,77 @@ struct BridgeView {
     b_value: String,
     b_community: i32,
     strength: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CorrelationParams {
+    a: Uuid,
+    b: Uuid,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceView {
+    chunk_id: Uuid,
+    document_id: Uuid,
+    title: Option<String>,
+    excerpt: String,
+    event_time: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl From<entities::EvidenceChunk> for EvidenceView {
+    fn from(e: entities::EvidenceChunk) -> Self {
+        Self {
+            chunk_id: e.chunk_id,
+            document_id: e.document_id,
+            title: e.title,
+            excerpt: e.excerpt,
+            event_time: e.event_time,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CorrelationDetail {
+    a: EntityView,
+    b: EntityView,
+    links: Vec<serde_json::Value>,
+    shared_chunks: Vec<EvidenceView>,
+    a_sample: Option<EvidenceView>,
+    b_sample: Option<EvidenceView>,
+}
+
+/// Explain WHY two entities correlate: the methods and strengths linking them,
+/// the chunks that mention both (the literal shared sentence, for co-occurrence),
+/// and a representative mention of each (to ground a semantic/temporal link).
+async fn correlation(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Query(params): Query<CorrelationParams>,
+) -> Result<Json<CorrelationDetail>, ApiError> {
+    ctx.require(Scope::Read)?;
+    let pool = &state.db.api;
+    let a = entities::get(pool, params.a)
+        .await?
+        .ok_or_else(|| ApiError(Error::not_found("entity")))?;
+    let b = entities::get(pool, params.b)
+        .await?
+        .ok_or_else(|| ApiError(Error::not_found("entity")))?;
+    let links = entities::pair_links(pool, params.a, params.b).await?;
+    let shared = entities::shared_chunks(pool, params.a, params.b, 3).await?;
+    let a_sample = entities::sample_mention(pool, params.a).await?;
+    let b_sample = entities::sample_mention(pool, params.b).await?;
+
+    Ok(Json(CorrelationDetail {
+        a: view(a),
+        b: view(b),
+        links: links
+            .into_iter()
+            .map(|l| serde_json::json!({ "method": l.method, "strength": l.strength }))
+            .collect(),
+        shared_chunks: shared.into_iter().map(EvidenceView::from).collect(),
+        a_sample: a_sample.map(EvidenceView::from),
+        b_sample: b_sample.map(EvidenceView::from),
+    }))
 }
 
 /// The strongest cross-community bridges: semantic links between entities that

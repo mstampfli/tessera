@@ -231,6 +231,24 @@ export const GraphNode = z.object({
 });
 export type GraphNode = z.infer<typeof GraphNode>;
 
+const EvidenceChunk = z.object({
+  chunk_id: z.string(),
+  document_id: z.string(),
+  title: z.string().nullable(),
+  excerpt: z.string(),
+  event_time: z.string().nullable().optional(),
+});
+
+export const CorrelationDetail = z.object({
+  a: Entity,
+  b: Entity,
+  links: z.array(z.object({ method: z.string(), strength: z.number() })),
+  shared_chunks: z.array(EvidenceChunk),
+  a_sample: EvidenceChunk.nullable().optional(),
+  b_sample: EvidenceChunk.nullable().optional(),
+});
+export type CorrelationDetail = z.infer<typeof CorrelationDetail>;
+
 export const Bridge = z.object({
   a_id: z.string(),
   a_kind: z.string(),
@@ -342,6 +360,8 @@ export const api = {
   },
   bridges: (limit?: number) =>
     request(`/v1/bridges${limit ? `?limit=${limit}` : ""}`, z.array(Bridge)),
+  correlation: (a: string, b: string) =>
+    request(`/v1/correlation?a=${a}&b=${b}`, CorrelationDetail),
 };
 
 // ---------------- live events (SSE) ------------------------------------------

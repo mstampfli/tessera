@@ -11,6 +11,7 @@ const NODE_CAP = 250;
 export default function GraphPage() {
   const [kind, setKind] = useState<string>("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<{ a: string; b: string } | null>(null);
   const [kinds, setKinds] = useState<string[]>([]);
 
   const q = useQuery({
@@ -18,6 +19,11 @@ export default function GraphPage() {
     queryFn: () => api.graph(kind || undefined, NODE_CAP),
   });
   const bridgesQ = useQuery({ queryKey: ["bridges"], queryFn: () => api.bridges(30) });
+  const corrQ = useQuery({
+    queryKey: ["correlation", selectedEdge?.a, selectedEdge?.b],
+    queryFn: () => api.correlation(selectedEdge!.a, selectedEdge!.b),
+    enabled: !!selectedEdge,
+  });
 
   // Learn the full kind list from the unfiltered view so the filter chips stay
   // stable when a kind is selected.
@@ -122,7 +128,14 @@ export default function GraphPage() {
               nodes={graphNodes}
               edges={graphEdges}
               selectedId={selectedId ?? undefined}
-              onSelectNode={setSelectedId}
+              onSelectNode={(id) => {
+                setSelectedId(id);
+                setSelectedEdge(null);
+              }}
+              onSelectEdge={(a, b) => {
+                setSelectedEdge({ a, b });
+                setSelectedId(null);
+              }}
               height={560}
               ariaLabel={`Global correlation graph: ${shown} entities`}
             />
@@ -130,7 +143,84 @@ export default function GraphPage() {
         </div>
 
         <aside className="w-full lg:w-80 lg:shrink-0">
-          {!selected && (
+          {selectedEdge && (
+            <div className="mk-frame p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="mk-kicker">why correlated</span>
+                <button className="mk-btn text-xs" onClick={() => setSelectedEdge(null)}>
+                  clear
+                </button>
+              </div>
+              {corrQ.isLoading && (
+                <p className="text-sm" style={{ color: "var(--mk-text-3)" }}>
+                  loading ...
+                </p>
+              )}
+              {corrQ.data && (
+                <>
+                  <p className="font-mono text-xs" style={{ color: "var(--mk-text-2)" }}>
+                    {corrQ.data.a.kind.replace("hash_", "")}: {corrQ.data.a.value}
+                    <br />
+                    <span style={{ color: "var(--mk-text-3)" }}>&harr;</span>
+                    <br />
+                    {corrQ.data.b.kind.replace("hash_", "")}: {corrQ.data.b.value}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {corrQ.data.links.map((l) => (
+                      <span key={l.method} className="mk-tag">
+                        {l.method === "similar"
+                          ? "contextual"
+                          : l.method === "temporal"
+                            ? "same time"
+                            : "co-occurs"}{" "}
+                        {Math.round(l.strength * 100)}
+                      </span>
+                    ))}
+                  </div>
+                  {corrQ.data.shared_chunks.length > 0 ? (
+                    <>
+                      <p className="mk-kicker mt-4">stated together in</p>
+                      {corrQ.data.shared_chunks.map((c) => (
+                        <Link
+                          key={c.chunk_id}
+                          href={`/documents/${c.document_id}?chunk=${c.chunk_id}`}
+                          className="mk-card mt-2 block p-2 text-xs"
+                          style={{ color: "var(--mk-text-2)" }}
+                        >
+                          {c.excerpt}
+                        </Link>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <p className="mk-kicker mt-4">
+                        never stated together; each appears in
+                      </p>
+                      {[corrQ.data.a_sample, corrQ.data.b_sample].filter(Boolean).map(
+                        (c) =>
+                          c && (
+                            <Link
+                              key={c.chunk_id}
+                              href={`/documents/${c.document_id}?chunk=${c.chunk_id}`}
+                              className="mk-card mt-2 block p-2 text-xs"
+                              style={{ color: "var(--mk-text-2)" }}
+                            >
+                              {c.event_time && (
+                                <span className="mk-tag mk-tag--success mr-1">
+                                  {c.event_time.slice(0, 10)}
+                                </span>
+                              )}
+                              {c.excerpt}
+                            </Link>
+                          ),
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {!selectedEdge && !selected && (
             <div className="mk-frame p-4">
               <span className="mk-kicker">bridges</span>
               <p className="mt-1 text-xs" style={{ color: "var(--mk-text-3)" }}>
@@ -173,7 +263,7 @@ export default function GraphPage() {
               </ul>
             </div>
           )}
-          {selected && (
+          {selected && !selectedEdge && (
             <div className="mk-frame p-4">
               <div className="mb-2 flex items-center justify-between">
                 <span className="mk-tag mk-tag--accent">{selected.kind.replace("hash_", "")}</span>
