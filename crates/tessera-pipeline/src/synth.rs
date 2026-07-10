@@ -12,19 +12,27 @@ use tessera_core::error::{Error, ErrorKind, Result};
 use tessera_db::repos::clusters::MemberChunk;
 use tessera_providers::{generate_json, GenRequest, LlmProvider};
 
-const SYSTEM: &str = "You describe what a group of related records shows, factually and \
-objectively. An algorithm has already grouped these excerpts; say what they are and how they \
-relate. Records co-occurring, or sharing infrastructure, a hosting provider, a CDN, or a \
-certificate authority, is NOT evidence of an attack, intent, or compromise; do not infer one. \
-These are records the operator collected about their own or authorized targets, not detections \
-of an adversary. The context begins with a PROVENANCE line saying where the records came from; \
-follow its guidance on how to frame the insight and what kind of suggested_actions to give. It \
-also includes a SECURITY SIGNAL line: discuss a security concern, and raise severity above \
-'info', ONLY when that line lists concrete indicators; if it says none, stay neutral and set \
-severity to 'info' with no alarmist actions. \
+const SYSTEM: &str = "You state what a group of related sources actually SAYS, factually and \
+objectively. An algorithm has already grouped these excerpts. State the SUBSTANCE they contain: \
+the specific claims, arguments, names, dates, numbers, and findings - concretely and in detail, \
+so a reader learns the content ITSELF. Do NOT merely say the sources 'discuss', 'mention', \
+'cover', 'highlight', 'relate to', or 'provide information about' a topic without saying WHAT \
+they claim or show; that is useless. When the sources describe a theory, position, event, or \
+finding, STATE what it asserts, who advances it, and the specific evidence, figures, or rebuttal \
+given. Prefer naming the concrete detail over summarizing that detail exists. \
+Records co-occurring, or sharing infrastructure, a hosting provider, a CDN, or a certificate \
+authority, is NOT evidence of an attack, intent, or compromise; do not infer one. These are \
+records the operator collected about their own or authorized targets, not detections of an \
+adversary. The context begins with a PROVENANCE line saying where the records came from; follow \
+its guidance on how to frame the insight and what kind of suggested_actions to give. It also \
+includes a SECURITY SIGNAL line: discuss a security concern, and raise severity above 'info', \
+ONLY when that line lists concrete indicators; if it says none, stay neutral and set severity to \
+'info' with no alarmist actions. \
 Respond with STRICT JSON only, no prose outside the JSON, with exactly these fields: \
-title (string, short), narrative (string; cite supporting excerpts inline as [E1], [E2], etc; \
-every claim must have a citation and you may only use the E-numbers provided), \
+title (string, short, naming the specific subject not a generic label), narrative (string, \
+several sentences that state the concrete substance and specifics - not a meta-summary that the \
+topic exists; cite supporting excerpts inline as [E1], [E2], etc; every claim must have a \
+citation and you may only use the E-numbers provided), \
 severity (one of: info, low, medium, high, critical), confidence (number 0 to 1), \
 suggested_actions (array of short imperative strings; may be empty). \
 Use only the provided context; invent nothing.";
@@ -68,7 +76,7 @@ pub async fn synthesize(
     let req = GenRequest {
         prompt: build_prompt(chunks, entities, collected),
         system: Some(SYSTEM.to_string()),
-        max_tokens: Some(700),
+        max_tokens: Some(1100),
     };
     let (raw, model): (RawInsight, String) = generate_json(llm.as_ref(), &req)
         .await
@@ -95,7 +103,7 @@ fn build_prompt(chunks: &[MemberChunk], entities: &[(String, String)], collected
     for (i, c) in chunks.iter().enumerate() {
         let marker = i + 1;
         let title = c.title.as_deref().unwrap_or("untitled");
-        let excerpt: String = c.text.chars().take(600).collect();
+        let excerpt: String = c.text.chars().take(1500).collect();
         let _ = write!(ctx, "[E{marker}] (from \"{title}\")\n{excerpt}\n\n");
     }
     let ent_list = if entities.is_empty() {
